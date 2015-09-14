@@ -9,7 +9,8 @@ import (
 )
 
 
-var broadcast = make(chan []byte, 1024)  // buffered
+const broadcastBuffSize = 1024 * 8  // 8Kb of data
+var broadcast = make(chan []byte, broadcastBuffSize)
 
 
 func log(args ...interface{}) {
@@ -32,7 +33,7 @@ func streamBroadcast() {
 	defer response.Body.Close()
 
 	for {
-		buff := make([]byte, 1024)
+		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
 			log("Error while streaming", url, "-", err)
@@ -44,41 +45,54 @@ func streamBroadcast() {
 
 
 func writeArchiveFile(quit chan int, fileName string) {
-	log("Writing to:", fileName)
+	log("Opening new archive file:", fileName)
 	output, err := os.Create(fileName)
 	if err != nil {
 		log("Error while creating file", err)
 		return
 	}
-	defer output.Close()
 
 	for {
 		select {
-		case streamChunk := <- broadcast:
+		case streamChunk := <-broadcast:
 			output.Write(streamChunk)
 		case <- quit:
-			log("exiting archive writer")
+			output.Close()
 			return
 		}
 	}
 }
 
 
+func rotateArchiveFile() chan int {
+	ts := time.Now()
+
+	archiveFileName := fmt.Sprintf(
+		// TODO: protect against overwriting existing files.
+		"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
+		ts.Year(), ts.Month(), ts.Day(), ts.Hour(),
+		ts.Minute(), ts.Second(),
+	)
+
+	archiveChan := make(chan int)
+	go writeArchiveFile(archiveChan, archiveFileName)
+	return archiveChan
+}
+
+
 func main() {
 	go streamBroadcast()
+	archiveChan := rotateArchiveFile()
+	ticker := time.NewTicker(1 * time.Second)
 
 	for {
-		localTime := time.Now()
-		archiveFileName := fmt.Sprintf(
-			"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
-			localTime.Year(), localTime.Month(),
-			localTime.Day(), localTime.Hour(),
-			localTime.Minute(), localTime.Second(),
-		)
-
-		writeArchive := make(chan int)
-		go writeArchiveFile(writeArchive, archiveFileName)
-		time.Sleep(time.Second * 30)
-		close(writeArchive)
+		// The Go docs say that this might drop ticks for slow receivers.
+		// TODO: address that somehow?
+		tick := <-ticker.C
+		if tick.Minute() == 0 && tick.Second() == 0 {
+			// Rotate the file at the start of every hour.
+			close(archiveChan)
+			archiveChan = rotateArchiveFile()
+		}
 	}
 }
