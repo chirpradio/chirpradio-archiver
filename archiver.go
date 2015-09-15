@@ -64,9 +64,7 @@ func writeArchiveFile(quit chan int, fileName string) {
 }
 
 
-func rotateArchiveFile() chan int {
-	ts := time.Now()
-
+func rotateArchiveFile(ts time.Time) chan int {
 	archiveFileName := fmt.Sprintf(
 		// TODO: protect against overwriting existing files.
 		"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
@@ -82,7 +80,8 @@ func rotateArchiveFile() chan int {
 
 func main() {
 	go streamBroadcast()
-	archiveChan := rotateArchiveFile()
+	archiveChan := rotateArchiveFile(time.Now())
+	// TODO: force Chicago time to always be in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
 
 	for {
@@ -92,7 +91,7 @@ func main() {
 		if tick.Minute() == 0 && tick.Second() == 0 {
 			// Rotate the file at the start of every hour.
 			close(archiveChan)
-			archiveChan = rotateArchiveFile()
+			archiveChan = rotateArchiveFile(tick)
 		}
 	}
 }
