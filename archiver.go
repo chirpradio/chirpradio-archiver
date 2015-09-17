@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-
 const broadcastBuffSize = 1024 * 8  // 8Kb of data
-var broadcast = make(chan []byte, broadcastBuffSize)
 
 
 func log(args ...interface{}) {
@@ -22,7 +20,7 @@ func log(args ...interface{}) {
 }
 
 
-func streamBroadcast() {
+func streamBroadcast(broadcast chan []byte) {
 	url := "http://chirpradio.org/stream"
 	log("Streaming broadcast from", url)
 	response, err := http.Get(url)
@@ -44,9 +42,18 @@ func streamBroadcast() {
 }
 
 
-func writeArchiveFile(quit chan int, fileName string) {
-	log("Opening new archive file:", fileName)
-	output, err := os.Create(fileName)
+type archiveInfo struct {
+	broadcast chan []byte
+	quit chan int
+	fileName string
+}
+
+type archiveWriter func(info archiveInfo)
+
+
+func writeArchiveFile(info archiveInfo) {
+	log("Opening new archive file:", info.fileName)
+	output, err := os.Create(info.fileName)
 	if err != nil {
 		log("Error while creating file", err)
 		return
@@ -54,9 +61,9 @@ func writeArchiveFile(quit chan int, fileName string) {
 
 	for {
 		select {
-		case streamChunk := <-broadcast:
+		case streamChunk := <-info.broadcast:
 			output.Write(streamChunk)
-		case <- quit:
+		case <- info.quit:
 			output.Close()
 			return
 		}
@@ -64,7 +71,8 @@ func writeArchiveFile(quit chan int, fileName string) {
 }
 
 
-func rotateArchiveFile(ts time.Time) chan int {
+func rotateArchiveFile(broadcast chan []byte, ts time.Time,
+					   writeFile archiveWriter) chan int {
 	archiveFileName := fmt.Sprintf(
 		// TODO: protect against overwriting existing files.
 		"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
@@ -73,25 +81,31 @@ func rotateArchiveFile(ts time.Time) chan int {
 	)
 
 	archiveChan := make(chan int)
-	go writeArchiveFile(archiveChan, archiveFileName)
+	go writeFile(archiveInfo{broadcast, archiveChan, archiveFileName})
 	return archiveChan
 }
 
 
 func main() {
-	go streamBroadcast()
-	archiveChan := rotateArchiveFile(time.Now())
+	var broadcast = make(chan []byte, broadcastBuffSize)
+
+	go streamBroadcast(broadcast)
+	archiveChan := rotateArchiveFile(
+		broadcast, time.Now(), writeArchiveFile)
+
 	// TODO: force Chicago time to always be in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
 
+	// Save the broadcast to disk, rotating the archive file at the start
+	// of every hour.
 	for {
 		// The Go docs say that this might drop ticks for slow receivers.
 		// TODO: address that somehow?
 		tick := <-ticker.C
 		if tick.Minute() == 0 && tick.Second() == 0 {
-			// Rotate the file at the start of every hour.
 			close(archiveChan)
-			archiveChan = rotateArchiveFile(tick)
+			archiveChan = rotateArchiveFile(
+				broadcast, tick, writeArchiveFile)
 		}
 	}
 }
