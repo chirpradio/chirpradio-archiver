@@ -49,7 +49,7 @@ type archiveInfo struct {
 }
 
 type fileOpener func(string) (io.WriteCloser, error)
-type archiveWriter func(info archiveInfo, openFile fileOpener)
+type archiveWriter func(info archiveInfo, openFile fileOpener) error
 
 
 func createFile(name string) (io.WriteCloser, error) {
@@ -59,12 +59,12 @@ func createFile(name string) (io.WriteCloser, error) {
 }
 
 
-func writeArchiveFile(info archiveInfo, openFile fileOpener) {
+func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 	log("Opening new archive file:", info.fileName)
 	output, err := openFile(info.fileName)
 	if err != nil {
-		log("Error while creating file", err)
-		return
+		log("Error while creating", info.fileName, ":", err)
+		return err
 	}
 
 	for {
@@ -73,7 +73,7 @@ func writeArchiveFile(info archiveInfo, openFile fileOpener) {
 			output.Write(streamChunk)
 		case <-info.quit:
 			output.Close()
-			return
+			return nil
 		}
 	}
 }

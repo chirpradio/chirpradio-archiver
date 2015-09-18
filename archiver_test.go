@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func TestRotateArchiveFile(t *testing.T) {
 	broadcast := make(chan []byte, broadcastBuffSize)
 	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
 
-	writer := func (info archiveInfo, openFile fileOpener) {
+	writer := func (info archiveInfo, openFile fileOpener) error {
 		fileIsOk := strings.HasSuffix(info.fileName,
 			"chirpradio_2015-09-18_230000.mp3")
 		if !fileIsOk {
@@ -22,6 +23,7 @@ func TestRotateArchiveFile(t *testing.T) {
 		}
 		writerCalled <- true
 		close(writerCalled)
+		return nil
 	}
 
 	rotateArchiveFile(broadcast, ts, writer)
@@ -49,21 +51,42 @@ func (f FakeOpener) Close() error {
 	return nil
 }
 
-func fakeOpen(name string) (io.WriteCloser, error) {
-	return FakeOpener{}, nil
-}
-
 
 func TestWriteArchiveFile(t *testing.T) {
 	broadcast := make(chan []byte)
 	quit := make(chan int)
 
+	openFakeFile := func(name string) (io.WriteCloser, error) {
+		return FakeOpener{}, nil
+	}
+
 	go writeArchiveFile(
 		archiveInfo{broadcast, quit, "some_file.mp3"},
-		fakeOpen)
+		openFakeFile)
 
 	// Send some data through the broadcast channel.
 	broadcast <- []byte{0, 0}
 	// TODO: figure out how to test that some output was written.
 	close(quit)
+}
+
+
+func TestWriteArchiveFileWithError(t *testing.T) {
+	broadcast := make(chan []byte)
+	quit := make(chan int)
+	// Close the channel in case the implementation doesn't return early as
+	// expected.
+	close(quit)
+
+	openFileAndReturnError := func(name string) (io.WriteCloser, error) {
+		return FakeOpener{}, errors.New("some error")
+	}
+
+	result := writeArchiveFile(
+		archiveInfo{broadcast, quit, "some_file.mp3"},
+		openFileAndReturnError)
+
+	if result == nil {
+		t.Error("Unexpected result")
+	}
 }
