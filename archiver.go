@@ -48,12 +48,20 @@ type archiveInfo struct {
 	fileName string
 }
 
-type archiveWriter func(info archiveInfo)
+type fileOpener func(string) (io.WriteCloser, error)
+type archiveWriter func(info archiveInfo, openFile fileOpener)
 
 
-func writeArchiveFile(info archiveInfo) {
+func createFile(name string) (io.WriteCloser, error) {
+	file, err := os.Create(name)
+	var writer io.WriteCloser = file
+	return writer, err
+}
+
+
+func writeArchiveFile(info archiveInfo, openFile fileOpener) {
 	log("Opening new archive file:", info.fileName)
-	output, err := os.Create(info.fileName)
+	output, err := openFile(info.fileName)
 	if err != nil {
 		log("Error while creating file", err)
 		return
@@ -63,7 +71,7 @@ func writeArchiveFile(info archiveInfo) {
 		select {
 		case streamChunk := <-info.broadcast:
 			output.Write(streamChunk)
-		case <- info.quit:
+		case <-info.quit:
 			output.Close()
 			return
 		}
@@ -71,8 +79,10 @@ func writeArchiveFile(info archiveInfo) {
 }
 
 
-func rotateArchiveFile(broadcast chan []byte, ts time.Time,
-					   writeFile archiveWriter) chan int {
+func rotateArchiveFile(
+		broadcast chan []byte, ts time.Time,
+		writeFile archiveWriter) chan int {
+
 	archiveFileName := fmt.Sprintf(
 		// TODO: protect against overwriting existing files.
 		"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
@@ -81,7 +91,9 @@ func rotateArchiveFile(broadcast chan []byte, ts time.Time,
 	)
 
 	archiveChan := make(chan int)
-	go writeFile(archiveInfo{broadcast, archiveChan, archiveFileName})
+	go writeFile(
+		archiveInfo{broadcast, archiveChan, archiveFileName},
+		createFile)
 	return archiveChan
 }
 
