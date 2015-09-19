@@ -51,7 +51,6 @@ func (f FakeOpener) Close() error {
 	return nil
 }
 
-
 func TestWriteArchiveFile(t *testing.T) {
 	broadcast := make(chan []byte)
 	quit := make(chan int)
@@ -88,5 +87,41 @@ func TestWriteArchiveFileWithError(t *testing.T) {
 
 	if result == nil {
 		t.Error("Unexpected result")
+	}
+}
+
+
+type FakeStream struct {
+	io.ReadCloser
+}
+
+func (FakeStream) Read(p []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (FakeStream) Close() error {
+	return nil
+}
+
+func TestStreamBroadcast(t *testing.T) {
+	urlOpened := make(chan bool)
+	broadcast := make(chan []byte)
+	streamChannel := make(chan bool)
+
+	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
+		urlOpened <- true
+		return &MinimalHttpResponse{&FakeStream{}}, nil
+	}
+
+	go streamBroadcast(broadcast, fakeUrlOpen, streamChannel)
+
+	for {
+		select {
+		case <-urlOpened:
+			close(streamChannel)
+			return
+		case <-time.After(3 * time.Second):
+			panic("timeout: streamBroadcast should open a URL")
+		}
 	}
 }

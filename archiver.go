@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const broadcastBuffSize = 1024 * 8  // 8Kb of data
+const broadcastBuffSize = 1024 * 64  // 64Kb of data
 
 
 func log(args ...interface{}) {
@@ -20,12 +20,19 @@ func log(args ...interface{}) {
 }
 
 
-func streamBroadcast(broadcast chan []byte) {
+type MinimalHttpResponse struct {
+	Body io.ReadCloser
+}
+
+type urlOpener func(string) (*MinimalHttpResponse, error)
+
+func streamBroadcast(
+		broadcast chan []byte, openUrl urlOpener, quit chan bool) {
 	url := "http://chirpradio.org/stream"
 	log("Streaming broadcast from", url)
-	response, err := http.Get(url)
+	response, err := openUrl(url)
 	if err != nil {
-		log("Error while downloading", url, "-", err)
+		log("Error while downloading", url, ":", err)
 		return
 	}
 	defer response.Body.Close()
@@ -34,10 +41,16 @@ func streamBroadcast(broadcast chan []byte) {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			log("Error while streaming", url, "-", err)
+			log("Error while streaming", url, ":", err)
 			return
 		}
-		broadcast <- buff
+		select {
+		case <-quit:
+			log("stopping stream from quit signal")
+			return
+		case broadcast <-buff:
+			continue
+		}
 	}
 }
 
@@ -50,14 +63,6 @@ type archiveInfo struct {
 
 type fileOpener func(string) (io.WriteCloser, error)
 type archiveWriter func(info archiveInfo, openFile fileOpener) error
-
-
-func createFile(name string) (io.WriteCloser, error) {
-	file, err := os.Create(name)
-	var writer io.WriteCloser = file
-	return writer, err
-}
-
 
 func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 	log("Opening new archive file:", info.fileName)
@@ -89,11 +94,18 @@ func rotateArchiveFile(
 		ts.Year(), ts.Month(), ts.Day(), ts.Hour(),
 		ts.Minute(), ts.Second(),
 	)
-
 	archiveChan := make(chan int)
+
+	createFile := func(name string) (io.WriteCloser, error) {
+		file, err := os.Create(name)
+		var writer io.WriteCloser = file
+		return writer, err
+	}
+
 	go writeFile(
 		archiveInfo{broadcast, archiveChan, archiveFileName},
 		createFile)
+
 	return archiveChan
 }
 
@@ -101,7 +113,12 @@ func rotateArchiveFile(
 func main() {
 	var broadcast = make(chan []byte, broadcastBuffSize)
 
-	go streamBroadcast(broadcast)
+	openUrl := func(url string) (*MinimalHttpResponse, error) {
+		response, err := http.Get(url)
+		return &MinimalHttpResponse{response.Body}, err
+	}
+	go streamBroadcast(broadcast, openUrl, make(chan bool))
+
 	archiveChan := rotateArchiveFile(
 		broadcast, time.Now(), writeArchiveFile)
 
