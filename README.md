@@ -7,15 +7,16 @@ to the archiving scripts in
 [chirpradio-machine](https://github.com/chirpradio/chirpradio-machine/).
 
 **IMPORTANT**: This is intended for internal station use only where we connect
-directly to our streaming box. Please don't archive the live broadcast yourself
-because CHIRP Radio pays per listener.
+directly to our streaming appliance. Please don't archive the live broadcast
+yourself (unless testing) because CHIRP Radio pays per listener.
 
 ## Usage
 
-Install [golang](http://golang.org/), clone this repository and start archiving like this:
+Install [golang](http://golang.org/) (>= 1.4),
+clone this repository, and start archiving like this:
 
     cd chirpradio-archiver/
-    go run archiver.go
+    go run archiver.go -url=http://chirpradio.org/stream
 
 ## Architecture
 

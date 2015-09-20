@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,7 @@ type urlOpener func(string) (*MinimalHttpResponse, error)
 
 
 type BroadcastSession struct {
+	streamUrl string
 	broadcast chan []byte
 	openUrl urlOpener
 	maxRetries int
@@ -43,14 +45,16 @@ func (c *BroadcastSession) IncrementRetry() {
 	log("Retrying...", c.retryCount)
 }
 
-func NewBroadcastSession(openUrl urlOpener, maxRetries int) *BroadcastSession {
+func NewBroadcastSession(
+		streamUrl string, openUrl urlOpener, maxRetries int) *BroadcastSession {
 	broadcast := make(chan []byte, broadcastBuffSize)
 	quit := make(chan bool)
 	retryCount := 0
 	retrySleepTime := 2 * time.Second
 
 	return &BroadcastSession{
-		broadcast, openUrl, maxRetries, quit, retryCount, retrySleepTime}
+		streamUrl, broadcast, openUrl, maxRetries, quit,
+		retryCount, retrySleepTime}
 }
 
 
@@ -61,12 +65,11 @@ func streamBroadcast(session *BroadcastSession) error {
 		return errors.New("too many retries")
 	}
 
-	url := "http://chirpradio.org/stream"
-	log("Streaming broadcast from", url)
-	response, err := session.openUrl(url)
+	log("Streaming broadcast from", session.streamUrl)
+	response, err := session.openUrl(session.streamUrl)
 
 	if err != nil {
-		log("Error while downloading", url, ":", err)
+		log("Error while downloading", session.streamUrl, ":", err)
 		session.IncrementRetry()
 		return streamBroadcast(session)
 	}
@@ -76,7 +79,7 @@ func streamBroadcast(session *BroadcastSession) error {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			log("Error while streaming", url, ":", err)
+			log("Error while streaming", session.streamUrl, ":", err)
 			session.IncrementRetry()
 			return streamBroadcast(session)
 		}
@@ -93,6 +96,8 @@ func streamBroadcast(session *BroadcastSession) error {
 			continue
 		}
 	}
+
+	return nil
 }
 
 
@@ -153,6 +158,11 @@ func rotateArchiveFile(
 
 
 func main() {
+	var url string = "http://chirpradio.org/stream"
+	flag.StringVar(
+		&url, "url", url, "URL to the CHIRP Radio broadcast stream")
+	flag.Parse()
+
 	openUrl := func(url string) (*MinimalHttpResponse, error) {
 		response, err := http.Get(url)
 		if err != nil {
@@ -161,7 +171,7 @@ func main() {
 		return &MinimalHttpResponse{response.Body}, err
 	}
 	maxErrorRetries := 10
-	session := NewBroadcastSession(openUrl, maxErrorRetries)
+	session := NewBroadcastSession(url, openUrl, maxErrorRetries)
 	go streamBroadcast(session)
 
 	archiveChan := rotateArchiveFile(

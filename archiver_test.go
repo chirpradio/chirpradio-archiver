@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var fakeStreamUrl = "http://not-chirpradio.org/"
+
 
 func TestRotateArchiveFile(t *testing.T) {
 	writerCalled := make(chan bool)
@@ -111,7 +113,7 @@ func TestStreamBroadcast(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, nil
 	}
 
-	session := NewBroadcastSession(fakeUrlOpen, 1)
+	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 1)
 	go streamBroadcast(session)
 
 	// TODO: figure out how to test that the stream gets sent to the broadcast
@@ -139,7 +141,7 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, errors.New("some error")
 	}
 
-	session := NewBroadcastSession(fakeUrlOpen, 2)
+	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 2)
 	session.retrySleepTime = 1 * time.Nanosecond
 	go streamBroadcast(session)
 
@@ -181,7 +183,7 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 		return &MinimalHttpResponse{&FakeErrorStream{}}, nil
 	}
 
-	session := NewBroadcastSession(fakeUrlOpen, 2)
+	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 2)
 	session.retrySleepTime = 1 * time.Nanosecond
 	go streamBroadcast(session)
 
@@ -218,7 +220,7 @@ func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, ret
 	}
 
-	session := NewBroadcastSession(fakeUrlOpen, 3)
+	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 3)
 	session.retrySleepTime = 1 * time.Nanosecond
 	go streamBroadcast(session)
 
