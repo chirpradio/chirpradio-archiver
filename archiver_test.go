@@ -111,8 +111,8 @@ func TestStreamBroadcast(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, nil
 	}
 
-	config := NewBroadcastConfig(fakeUrlOpen, 1)
-	go streamBroadcast(config)
+	session := NewBroadcastSession(fakeUrlOpen, 1)
+	go streamBroadcast(session)
 
 	// TODO: figure out how to test that the stream gets sent to the broadcast
 	// channel.
@@ -120,7 +120,7 @@ func TestStreamBroadcast(t *testing.T) {
 	for {
 		select {
 		case <-urlOpened:
-			close(config.quit)
+			close(session.quit)
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: streamBroadcast should open a URL")
@@ -139,9 +139,9 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, errors.New("some error")
 	}
 
-	config := NewBroadcastConfig(fakeUrlOpen, 2)
-	config.retrySleepTime = 1 * time.Nanosecond
-	go streamBroadcast(config)
+	session := NewBroadcastSession(fakeUrlOpen, 2)
+	session.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(session)
 
 	for {
 		select {
@@ -150,7 +150,7 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 				log("stream not opened enough times:", timesOpened)
 				continue
 			}
-			close(config.quit)
+			close(session.quit)
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: did not retry enough times after error")
@@ -181,9 +181,9 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 		return &MinimalHttpResponse{&FakeErrorStream{}}, nil
 	}
 
-	config := NewBroadcastConfig(fakeUrlOpen, 2)
-	config.retrySleepTime = 1 * time.Nanosecond
-	go streamBroadcast(config)
+	session := NewBroadcastSession(fakeUrlOpen, 2)
+	session.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(session)
 
 	for {
 		select {
@@ -192,7 +192,7 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 				log("stream not opened enough times:", timesOpened)
 				continue
 			}
-			close(config.quit)
+			close(session.quit)
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: did not retry enough times after error")
@@ -218,20 +218,20 @@ func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
 		return &MinimalHttpResponse{&FakeStream{}}, ret
 	}
 
-	config := NewBroadcastConfig(fakeUrlOpen, 3)
-	config.retrySleepTime = 1 * time.Nanosecond
-	go streamBroadcast(config)
+	session := NewBroadcastSession(fakeUrlOpen, 3)
+	session.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(session)
 
 	for {
 		select {
 		case <-urlOpenCount:
 			// TODO: fix this test so it actually verifies the reset.
 			// There is some timing error here where it always passes :/
-			if config.retryCount != 0 {
+			if session.retryCount != 0 {
 				log("retry count has not been reset yet")
 				continue
 			}
-			close(config.quit)
+			close(session.quit)
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: did not retry enough times after error")

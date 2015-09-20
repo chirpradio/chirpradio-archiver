@@ -28,7 +28,7 @@ type MinimalHttpResponse struct {
 type urlOpener func(string) (*MinimalHttpResponse, error)
 
 
-type BroadcastConfig struct {
+type BroadcastSession struct {
 	broadcast chan []byte
 	openUrl urlOpener
 	maxRetries int
@@ -37,38 +37,38 @@ type BroadcastConfig struct {
 	retrySleepTime time.Duration
 }
 
-func (c *BroadcastConfig) IncrementRetry() {
+func (c *BroadcastSession) IncrementRetry() {
 	time.Sleep(c.retrySleepTime)
 	c.retryCount += 1
 	log("Retrying...", c.retryCount)
 }
 
-func NewBroadcastConfig(openUrl urlOpener, maxRetries int) *BroadcastConfig {
+func NewBroadcastSession(openUrl urlOpener, maxRetries int) *BroadcastSession {
 	broadcast := make(chan []byte, broadcastBuffSize)
 	quit := make(chan bool)
 	retryCount := 0
 	retrySleepTime := 2 * time.Second
 
-	return &BroadcastConfig{
+	return &BroadcastSession{
 		broadcast, openUrl, maxRetries, quit, retryCount, retrySleepTime}
 }
 
 
-func streamBroadcast(config *BroadcastConfig) error {
+func streamBroadcast(session *BroadcastSession) error {
 
-	if config.retryCount == config.maxRetries {
+	if session.retryCount == session.maxRetries {
 		log("streamBroadcast: too many error recovery retries")
 		return errors.New("too many retries")
 	}
 
 	url := "http://chirpradio.org/stream"
 	log("Streaming broadcast from", url)
-	response, err := config.openUrl(url)
+	response, err := session.openUrl(url)
 
 	if err != nil {
 		log("Error while downloading", url, ":", err)
-		config.IncrementRetry()
-		return streamBroadcast(config)
+		session.IncrementRetry()
+		return streamBroadcast(session)
 	}
 	defer response.Body.Close()
 
@@ -77,19 +77,19 @@ func streamBroadcast(config *BroadcastConfig) error {
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
 			log("Error while streaming", url, ":", err)
-			config.IncrementRetry()
-			return streamBroadcast(config)
+			session.IncrementRetry()
+			return streamBroadcast(session)
 		}
 
 		// We've successfully recovered from the last persistent error
 		// so reset the retry count.
-		config.retryCount = 0
+		session.retryCount = 0
 
 		select {
-		case <-config.quit:
+		case <-session.quit:
 			log("stopping stream from quit signal")
 			return nil
-		case config.broadcast <-buff:
+		case session.broadcast <-buff:
 			continue
 		}
 	}
@@ -161,11 +161,11 @@ func main() {
 		return &MinimalHttpResponse{response.Body}, err
 	}
 	maxErrorRetries := 10
-	config := NewBroadcastConfig(openUrl, maxErrorRetries)
-	go streamBroadcast(config)
+	session := NewBroadcastSession(openUrl, maxErrorRetries)
+	go streamBroadcast(session)
 
 	archiveChan := rotateArchiveFile(
-		config.broadcast, time.Now(), writeArchiveFile)
+		session.broadcast, time.Now(), writeArchiveFile)
 
 	// TODO: force Chicago time so files are always in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
@@ -179,7 +179,7 @@ func main() {
 		if tick.Minute() == 0 && tick.Second() == 0 {
 			close(archiveChan)
 			archiveChan = rotateArchiveFile(
-				config.broadcast, tick, writeArchiveFile)
+				session.broadcast, tick, writeArchiveFile)
 		}
 	}
 }
