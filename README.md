@@ -1,10 +1,14 @@
 # chirpradio-archiver
 
-This is a long running program that listens to the
+This is a long running program that listens to the live
 [CHIRP Radio](http://chirpradio.org/) broadcast
 stream and saves archive files to disk, one file per hour. It is the successor
 to the archiving scripts in
 [chirpradio-machine](https://github.com/chirpradio/chirpradio-machine/).
+
+**IMPORTANT**: This is intended for internal station use only where we connect
+directly to our streaming box. Please don't archive the live broadcast yourself
+because CHIRP Radio pays per listener.
 
 ## Usage
 
