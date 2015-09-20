@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,14 +27,48 @@ type MinimalHttpResponse struct {
 
 type urlOpener func(string) (*MinimalHttpResponse, error)
 
-func streamBroadcast(
-		broadcast chan []byte, openUrl urlOpener, quit chan bool) {
+
+type BroadcastConfig struct {
+	broadcast chan []byte
+	openUrl urlOpener
+	maxRetries int
+	quit chan bool
+	retryCount int
+	retrySleepTime time.Duration
+}
+
+func (c *BroadcastConfig) IncrementRetry() {
+	time.Sleep(c.retrySleepTime)
+	c.retryCount += 1
+	log("Retrying...", c.retryCount)
+}
+
+func NewBroadcastConfig(openUrl urlOpener, maxRetries int) *BroadcastConfig {
+	broadcast := make(chan []byte, broadcastBuffSize)
+	quit := make(chan bool)
+	retryCount := 0
+	retrySleepTime := 2 * time.Second
+
+	return &BroadcastConfig{
+		broadcast, openUrl, maxRetries, quit, retryCount, retrySleepTime}
+}
+
+
+func streamBroadcast(config *BroadcastConfig) error {
+
+	if config.retryCount == config.maxRetries {
+		log("streamBroadcast: too many error recovery retries")
+		return errors.New("too many retries")
+	}
+
 	url := "http://chirpradio.org/stream"
 	log("Streaming broadcast from", url)
-	response, err := openUrl(url)
+	response, err := config.openUrl(url)
+
 	if err != nil {
 		log("Error while downloading", url, ":", err)
-		return
+		config.IncrementRetry()
+		return streamBroadcast(config)
 	}
 	defer response.Body.Close()
 
@@ -42,13 +77,19 @@ func streamBroadcast(
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
 			log("Error while streaming", url, ":", err)
-			return
+			config.IncrementRetry()
+			return streamBroadcast(config)
 		}
+
+		// We've successfully recovered from the last persistent error
+		// so reset the retry count.
+		config.retryCount = 0
+
 		select {
-		case <-quit:
+		case <-config.quit:
 			log("stopping stream from quit signal")
-			return
-		case broadcast <-buff:
+			return nil
+		case config.broadcast <-buff:
 			continue
 		}
 	}
@@ -62,7 +103,6 @@ type archiveInfo struct {
 }
 
 type fileOpener func(string) (io.WriteCloser, error)
-type archiveWriter func(info archiveInfo, openFile fileOpener) error
 
 func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 	log("Opening new archive file:", info.fileName)
@@ -74,6 +114,8 @@ func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 
 	for {
 		select {
+		// TODO: think of a way to give precedence to the broadcast channel
+		// in case the quit channel is ready simultaneously.
 		case streamChunk := <-info.broadcast:
 			output.Write(streamChunk)
 		case <-info.quit:
@@ -83,6 +125,8 @@ func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 	}
 }
 
+
+type archiveWriter func(info archiveInfo, openFile fileOpener) error
 
 func rotateArchiveFile(
 		broadcast chan []byte, ts time.Time,
@@ -111,30 +155,33 @@ func rotateArchiveFile(
 
 
 func main() {
-	var broadcast = make(chan []byte, broadcastBuffSize)
-
 	openUrl := func(url string) (*MinimalHttpResponse, error) {
 		response, err := http.Get(url)
+		if err != nil {
+			return &MinimalHttpResponse{}, err
+		}
 		return &MinimalHttpResponse{response.Body}, err
 	}
-	go streamBroadcast(broadcast, openUrl, make(chan bool))
+	maxErrorRetries := 10
+	config := NewBroadcastConfig(openUrl, maxErrorRetries)
+	go streamBroadcast(config)
 
 	archiveChan := rotateArchiveFile(
-		broadcast, time.Now(), writeArchiveFile)
+		config.broadcast, time.Now(), writeArchiveFile)
 
-	// TODO: force Chicago time to always be in sync with the broadcast.
+	// TODO: force Chicago time so files are always in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
 
 	// Save the broadcast to disk, rotating the archive file at the start
 	// of every hour.
 	for {
 		// The Go docs say that this might drop ticks for slow receivers.
-		// TODO: address that somehow?
+		// TODO: address dropped ticks somehow?
 		tick := <-ticker.C
 		if tick.Minute() == 0 && tick.Second() == 0 {
 			close(archiveChan)
 			archiveChan = rotateArchiveFile(
-				broadcast, tick, writeArchiveFile)
+				config.broadcast, tick, writeArchiveFile)
 		}
 	}
 }

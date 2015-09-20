@@ -105,23 +105,136 @@ func (FakeStream) Close() error {
 
 func TestStreamBroadcast(t *testing.T) {
 	urlOpened := make(chan bool)
-	broadcast := make(chan []byte)
-	streamChannel := make(chan bool)
 
 	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
 		urlOpened <- true
 		return &MinimalHttpResponse{&FakeStream{}}, nil
 	}
 
-	go streamBroadcast(broadcast, fakeUrlOpen, streamChannel)
+	config := NewBroadcastConfig(fakeUrlOpen, 1)
+	go streamBroadcast(config)
+
+	// TODO: figure out how to test that the stream gets sent to the broadcast
+	// channel.
 
 	for {
 		select {
 		case <-urlOpened:
-			close(streamChannel)
+			close(config.quit)
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: streamBroadcast should open a URL")
+		}
+	}
+}
+
+
+func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
+	urlOpenCount := make(chan int)
+	var counter int = 0;
+
+	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
+		counter += 1
+		urlOpenCount <- counter
+		return &MinimalHttpResponse{&FakeStream{}}, errors.New("some error")
+	}
+
+	config := NewBroadcastConfig(fakeUrlOpen, 2)
+	config.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(config)
+
+	for {
+		select {
+		case timesOpened := <-urlOpenCount:
+			if timesOpened < 2 {
+				log("stream not opened enough times:", timesOpened)
+				continue
+			}
+			close(config.quit)
+			return
+		case <-time.After(3 * time.Second):
+			panic("timeout: did not retry enough times after error")
+		}
+	}
+}
+
+
+type FakeErrorStream struct {
+	io.ReadCloser
+}
+
+func (FakeErrorStream) Read(p []byte) (n int, err error) {
+	return 0, errors.New("some Read() error")
+}
+
+func (FakeErrorStream) Close() error {
+	return nil
+}
+
+func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
+	urlOpenCount := make(chan int)
+	var counter int = 0;
+
+	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
+		counter += 1
+		urlOpenCount <- counter
+		return &MinimalHttpResponse{&FakeErrorStream{}}, nil
+	}
+
+	config := NewBroadcastConfig(fakeUrlOpen, 2)
+	config.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(config)
+
+	for {
+		select {
+		case timesOpened := <-urlOpenCount:
+			if timesOpened < 2 {
+				log("stream not opened enough times:", timesOpened)
+				continue
+			}
+			close(config.quit)
+			return
+		case <-time.After(3 * time.Second):
+			panic("timeout: did not retry enough times after error")
+		}
+	}
+}
+
+
+func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
+	urlOpenCount := make(chan int)
+	var counter int = 0;
+
+	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
+		counter += 1
+		urlOpenCount <- counter
+		var ret error
+		// Only return an error on the first call.
+		if counter == 1 {
+			ret = errors.New("error to check reset")
+		} else {
+			ret = nil
+		}
+		return &MinimalHttpResponse{&FakeStream{}}, ret
+	}
+
+	config := NewBroadcastConfig(fakeUrlOpen, 3)
+	config.retrySleepTime = 1 * time.Nanosecond
+	go streamBroadcast(config)
+
+	for {
+		select {
+		case <-urlOpenCount:
+			// TODO: fix this test so it actually verifies the reset.
+			// There is some timing error here where it always passes :/
+			if config.retryCount != 0 {
+				log("retry count has not been reset yet")
+				continue
+			}
+			close(config.quit)
+			return
+		case <-time.After(3 * time.Second):
+			panic("timeout: did not retry enough times after error")
 		}
 	}
 }
