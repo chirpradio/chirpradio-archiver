@@ -39,10 +39,10 @@ type BroadcastSession struct {
 	retrySleepTime time.Duration
 }
 
-func (c *BroadcastSession) IncrementRetry() {
-	time.Sleep(c.retrySleepTime)
-	c.retryCount += 1
-	log("Retrying...", c.retryCount)
+func (sess *BroadcastSession) IncrementRetry() {
+	time.Sleep(sess.retrySleepTime)
+	sess.retryCount += 1
+	log("Retrying...", sess.retryCount)
 }
 
 func NewBroadcastSession(
@@ -101,27 +101,57 @@ func streamBroadcast(session *BroadcastSession) error {
 }
 
 
-type archiveInfo struct {
+type ArchiveWriter interface {
+	OpenFile() (io.WriteCloser, error)
+	FileName() string
+	Broadcast() chan []byte
+	Quit() chan int
+}
+
+type ArchiveFileWriter struct {
 	broadcast chan []byte
 	quit chan int
 	fileName string
 }
 
+func (w *ArchiveFileWriter) OpenFile() (io.WriteCloser, error) {
+	log("Opening new archive file:", w.fileName)
+	file, err := os.Create(w.fileName)
+	return file, err
+}
+
+func (w *ArchiveFileWriter) FileName() string {
+	return w.fileName
+}
+
+func (w *ArchiveFileWriter) Broadcast() chan []byte {
+	return w.broadcast
+}
+
+func (w *ArchiveFileWriter) Quit() chan int {
+	return w.quit
+}
+
+func NewArchiveFileWriter(
+		broadcast chan []byte, quit chan int,
+		fileName string) (ArchiveWriter) {
+	return &ArchiveFileWriter{broadcast, quit, fileName}
+}
+
 type fileOpener func(string) (io.WriteCloser, error)
 
-func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
-	log("Opening new archive file:", info.fileName)
-	output, err := openFile(info.fileName)
+func writeArchiveFile(writer ArchiveWriter) error {
+	output, err := writer.OpenFile()
 	if err != nil {
-		log("Error while creating", info.fileName, ":", err)
+		log("Error while creating", writer.FileName(), ":", err)
 		return err
 	}
 
 	for {
 		select {
-		case streamChunk := <-info.broadcast:
+		case streamChunk := <-writer.Broadcast():
 			output.Write(streamChunk)
-		case <-info.quit:
+		case <-writer.Quit():
 			output.Close()
 			return nil
 		}
@@ -129,29 +159,35 @@ func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 }
 
 
-type archiveWriter func(info archiveInfo, openFile fileOpener) error
+type writeArchiveHandler func(writer ArchiveWriter) error
 
-func rotateArchiveFile(
-		broadcast chan []byte, ts time.Time,
-		writeFile archiveWriter) chan int {
+type ArchiveConfig struct {
+	dest string
+	broadcast chan []byte
+	ts time.Time
+	writeFile writeArchiveHandler
+}
 
-	archiveFileName := fmt.Sprintf(
-		// TODO: protect against overwriting existing files.
-		"archives/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
-		ts.Year(), ts.Month(), ts.Day(), ts.Hour(),
-		ts.Minute(), ts.Second(),
+func NewArchiveConfig(
+		dest string, broadcast chan []byte, ts time.Time,
+		writeFile writeArchiveHandler) (*ArchiveConfig) {
+	return &ArchiveConfig{dest, broadcast, ts, writeFile}
+}
+
+func rotateArchiveFile(archive *ArchiveConfig) chan int {
+
+	// TODO: split directory into YYYY/MM
+	// TODO: protect against overwriting existing files.
+	fileName := fmt.Sprintf(
+		"%s/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
+		archive.dest,
+		archive.ts.Year(), archive.ts.Month(), archive.ts.Day(),
+		archive.ts.Hour(), archive.ts.Minute(), archive.ts.Second(),
 	)
 	archiveChan := make(chan int)
 
-	createFile := func(name string) (io.WriteCloser, error) {
-		file, err := os.Create(name)
-		var writer io.WriteCloser = file
-		return writer, err
-	}
-
-	go writeFile(
-		archiveInfo{broadcast, archiveChan, archiveFileName},
-		createFile)
+	writer := NewArchiveFileWriter(archive.broadcast, archiveChan, fileName)
+	go archive.writeFile(writer)
 
 	return archiveChan
 }
@@ -160,7 +196,13 @@ func rotateArchiveFile(
 func main() {
 	var url string = "http://chirpradio.org/stream"
 	flag.StringVar(
-		&url, "url", url, "URL to the CHIRP Radio broadcast stream")
+		&url, "url", url, "URL to the CHIRP Radio broadcast stream.")
+
+	var archiveDest = "./archives"
+	flag.StringVar(
+		&archiveDest, "dest", archiveDest,
+		"Directory to write archives to. This must exist and be writable.")
+
 	flag.Parse()
 
 	openUrl := func(url string) (*MinimalHttpResponse, error) {
@@ -174,8 +216,9 @@ func main() {
 	session := NewBroadcastSession(url, openUrl, maxErrorRetries)
 	go streamBroadcast(session)
 
-	archiveChan := rotateArchiveFile(
-		session.broadcast, time.Now(), writeArchiveFile)
+	archive := NewArchiveConfig(
+		archiveDest, session.broadcast, time.Now(), writeArchiveFile)
+	archiveChan := rotateArchiveFile(archive)
 
 	// TODO: force Chicago time so files are always in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
@@ -188,8 +231,8 @@ func main() {
 		tick := <-ticker.C
 		if tick.Minute() == 0 && tick.Second() == 0 {
 			close(archiveChan)
-			archiveChan = rotateArchiveFile(
-				session.broadcast, tick, writeArchiveFile)
+			archive.ts = tick
+			archiveChan = rotateArchiveFile(archive)
 		}
 	}
 }

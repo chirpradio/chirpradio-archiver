@@ -16,7 +16,7 @@ Install [golang](http://golang.org/) (>= 1.4),
 clone this repository, and start archiving like this:
 
     cd chirpradio-archiver/
-    go run archiver.go -url=http://chirpradio.org/stream
+    go run archiver.go -url=http://chirpradio.org/stream -dest=/path/to/archives
 
 ## Architecture
 

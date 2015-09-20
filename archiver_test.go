@@ -14,21 +14,28 @@ var fakeStreamUrl = "http://not-chirpradio.org/"
 func TestRotateArchiveFile(t *testing.T) {
 	writerCalled := make(chan bool)
 
+	prefix := "/archive-dir-prefix"
 	broadcast := make(chan []byte, broadcastBuffSize)
 	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
 
-	writer := func (info archiveInfo, openFile fileOpener) error {
-		fileIsOk := strings.HasSuffix(info.fileName,
+	writer := func (info ArchiveWriter) error {
+		fileIsOk := strings.HasSuffix(info.FileName(),
 			"chirpradio_2015-09-18_230000.mp3")
 		if !fileIsOk {
-			t.Error("Unexpected filename:", info.fileName)
+			t.Error("Unexpected suffix:", info.FileName())
 		}
+
+		dirIsOk := strings.HasPrefix(info.FileName(), prefix)
+		if !dirIsOk {
+			t.Error("Unexpected prefix:", info.FileName())
+		}
+
 		writerCalled <- true
 		close(writerCalled)
 		return nil
 	}
 
-	rotateArchiveFile(broadcast, ts, writer)
+	rotateArchiveFile(NewArchiveConfig(prefix, broadcast, ts, writer))
 
 	for {
 		select {
@@ -53,39 +60,75 @@ func (f FakeOpener) Close() error {
 	return nil
 }
 
+type MockArchiveWriter struct {
+	broadcast chan []byte
+	quit chan int
+}
+
+func (w *MockArchiveWriter) OpenFile() (io.WriteCloser, error) {
+	return FakeOpener{}, nil
+}
+
+func (w *MockArchiveWriter) FileName() string {
+	return "mock_archive_file.mp3"
+}
+
+func (w *MockArchiveWriter) Broadcast() chan []byte {
+	return w.broadcast
+}
+
+func (w *MockArchiveWriter) Quit() chan int {
+	return w.quit
+}
+
+func NewMockArchiveWriter() (*MockArchiveWriter) {
+	return &MockArchiveWriter{
+		broadcast: make(chan []byte),
+		quit: make(chan int)}
+}
+
 func TestWriteArchiveFile(t *testing.T) {
-	broadcast := make(chan []byte)
-	quit := make(chan int)
-
-	openFakeFile := func(name string) (io.WriteCloser, error) {
-		return FakeOpener{}, nil
-	}
-
-	go writeArchiveFile(
-		archiveInfo{broadcast, quit, "some_file.mp3"},
-		openFakeFile)
+	writer := NewMockArchiveWriter()
+	go writeArchiveFile(writer)
 
 	// Send some data through the broadcast channel.
-	broadcast <- []byte{0, 0}
+	writer.Broadcast() <- []byte{0, 0}
 	// TODO: figure out how to test that some output was written.
-	close(quit)
+	close(writer.Quit())
 }
 
 
+type MockArchiveErrorWriter struct {
+	MockArchiveWriter
+	broadcast chan []byte
+	quit chan int
+}
+
+func (w *MockArchiveErrorWriter) OpenFile() (io.WriteCloser, error) {
+	return FakeOpener{}, errors.New("some error")
+}
+
+func (w *MockArchiveErrorWriter) Broadcast() chan []byte {
+	return w.broadcast
+}
+
+func (w *MockArchiveErrorWriter) Quit() chan int {
+	return w.quit
+}
+
+func NewMockArchiveErrorWriter() (*MockArchiveErrorWriter) {
+	return &MockArchiveErrorWriter{
+		broadcast: make(chan []byte),
+		quit: make(chan int)}
+}
+
 func TestWriteArchiveFileWithError(t *testing.T) {
-	broadcast := make(chan []byte)
-	quit := make(chan int)
+	writer := NewMockArchiveErrorWriter()
 	// Close the channel in case the implementation doesn't return early as
 	// expected.
-	close(quit)
+	close(writer.Quit())
 
-	openFileAndReturnError := func(name string) (io.WriteCloser, error) {
-		return FakeOpener{}, errors.New("some error")
-	}
-
-	result := writeArchiveFile(
-		archiveInfo{broadcast, quit, "some_file.mp3"},
-		openFileAndReturnError)
+	result := writeArchiveFile(writer)
 
 	if result == nil {
 		t.Error("Unexpected result")
