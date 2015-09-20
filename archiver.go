@@ -114,8 +114,6 @@ func writeArchiveFile(info archiveInfo, openFile fileOpener) error {
 
 	for {
 		select {
-		// TODO: think of a way to give precedence to the broadcast channel
-		// in case the quit channel is ready simultaneously.
 		case streamChunk := <-info.broadcast:
 			output.Write(streamChunk)
 		case <-info.quit:
