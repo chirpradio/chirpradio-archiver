@@ -137,6 +137,7 @@ func TestWriteArchiveFileWithError(t *testing.T) {
 	}
 }
 
+
 func NewFakeStream() io.ReadCloser {
 	// Make a fake stream chunk for the archive writer to consume.
 	buf := bytes.NewBufferString(strings.Repeat("x", broadcastBuffSize))
@@ -149,13 +150,12 @@ func NewFakeErrorStream() io.ReadCloser {
 	return ioutil.NopCloser(buf)
 }
 
+
 type MockBroadcastSession struct {
+	*ChirpBroadcastSession
 	urlOpened chan bool
 	broadcast chan []byte
 	quit chan bool
-}
-
-func (*MockBroadcastSession) IncrementRetry() {
 }
 
 func (sess *MockBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
@@ -175,26 +175,21 @@ func (sess *MockBroadcastSession) Quit() chan bool {
 	return sess.quit
 }
 
-func (*MockBroadcastSession) MaxRetries() int {
-	return 1
-}
-
-func (*MockBroadcastSession) RetryCount() int {
-	return 0
-}
-
-func (*MockBroadcastSession) ResetRetryCount() {
-}
-
-func NewMockBroadcastSession() *MockBroadcastSession {
+func NewMockBroadcastSession(maxRetries int) *MockBroadcastSession {
 	return &MockBroadcastSession{
+		ChirpBroadcastSession: &ChirpBroadcastSession{
+			streamUrl: fakeStreamUrl,
+			maxRetries: maxRetries,
+			retryCount: 0,
+			retrySleepTime: 1 * time.Nanosecond},
 		urlOpened: make(chan bool),
 		broadcast: make(chan []byte),
 		quit: make(chan bool)}
 }
 
 func TestStreamBroadcast(t *testing.T) {
-	session := NewMockBroadcastSession()
+	maxRetries := 1
+	session := NewMockBroadcastSession(maxRetries)
 	go streamBroadcast(session)
 
 	// TODO: figure out how to test that the stream gets sent to the broadcast
@@ -214,35 +209,22 @@ func TestStreamBroadcast(t *testing.T) {
 
 type MockCounterBroadcastSession struct {
 	*MockBroadcastSession
-	counter int
+	timesUrlOpened int
 	urlOpenCount chan int
-	retryCount int
 }
 
 func (sess *MockCounterBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
-	sess.counter += 1
-	sess.urlOpenCount <- sess.counter
+	sess.timesUrlOpened += 1
+	sess.urlOpenCount <- sess.timesUrlOpened
 	return &MinimalHttpResponse{NewFakeStream()}, errors.New("some error")
 }
 
-func (sess *MockCounterBroadcastSession) IncrementRetry() {
-	sess.retryCount += 1
-}
-
-func (sess *MockCounterBroadcastSession) MaxRetries() int {
-	return 2
-}
-
-func (sess *MockCounterBroadcastSession) RetryCount() int {
-	return sess.retryCount
-}
-
 func NewMockCounterBroadcastSession() *MockCounterBroadcastSession {
+	maxRetries := 2
 	return &MockCounterBroadcastSession{
-		MockBroadcastSession: NewMockBroadcastSession(),
-		retryCount: 0,
+		MockBroadcastSession: NewMockBroadcastSession(maxRetries),
 		urlOpenCount: make(chan int),
-		counter: 0}
+		timesUrlOpened: 0}
 }
 
 func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
@@ -267,35 +249,22 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 
 type MockReadErrorBroadcastSession struct {
 	*MockBroadcastSession
-	counter int
+	timesUrlOpened int
 	urlOpenCount chan int
-	retryCount int
 }
 
 func (sess *MockReadErrorBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
-	sess.counter += 1
-	sess.urlOpenCount <- sess.counter
+	sess.timesUrlOpened += 1
+	sess.urlOpenCount <- sess.timesUrlOpened
 	return &MinimalHttpResponse{NewFakeErrorStream()}, nil
 }
 
-func (sess *MockReadErrorBroadcastSession) IncrementRetry() {
-	sess.retryCount += 1
-}
-
-func (sess *MockReadErrorBroadcastSession) MaxRetries() int {
-	return 2
-}
-
-func (sess *MockReadErrorBroadcastSession) RetryCount() int {
-	return sess.retryCount
-}
-
 func NewMockReadErrorBroadcastSession() *MockReadErrorBroadcastSession {
+	maxRetries := 2
 	return &MockReadErrorBroadcastSession{
-		MockBroadcastSession: NewMockBroadcastSession(),
-		retryCount: 0,
+		MockBroadcastSession: NewMockBroadcastSession(maxRetries),
 		urlOpenCount: make(chan int),
-		counter: 0}
+		timesUrlOpened: 0}
 }
 
 func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
@@ -320,49 +289,35 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 
 type MockErrorRecoveryBroadcastSession struct {
 	*MockBroadcastSession
-	counter int
+	timesUrlOpened int
 	wasReset chan bool
-	retryCount int
 }
 
 func (sess *MockErrorRecoveryBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
-	sess.counter += 1
+	sess.timesUrlOpened += 1
 	var ret error
 	// Only return an error on the first call.
-	if sess.counter == 1 {
+	if sess.timesUrlOpened == 1 {
 		log("returning error on first call")
 		ret = errors.New("error to check reset")
 	} else {
-		log("returning nil error on call:", sess.counter)
+		log("returning nil error on call:", sess.timesUrlOpened)
 		ret = nil
 	}
 	return &MinimalHttpResponse{NewFakeStream()}, ret
 }
 
-func (sess *MockErrorRecoveryBroadcastSession) IncrementRetry() {
-	sess.retryCount += 1
-}
-
-func (sess *MockErrorRecoveryBroadcastSession) MaxRetries() int {
-	return 3
-}
-
-func (sess *MockErrorRecoveryBroadcastSession) RetryCount() int {
-	return sess.retryCount
-}
-
 func (sess *MockErrorRecoveryBroadcastSession) ResetRetryCount() {
 	log("resetting retry count")
 	sess.wasReset <-true
-	sess.retryCount = 0
 }
 
 func NewMockErrorRecoveryBroadcastSession() *MockErrorRecoveryBroadcastSession {
+	maxRetries := 3
 	return &MockErrorRecoveryBroadcastSession{
-		MockBroadcastSession: NewMockBroadcastSession(),
-		retryCount: 0,
+		MockBroadcastSession: NewMockBroadcastSession(maxRetries),
 		wasReset: make(chan bool),
-		counter: 0}
+		timesUrlOpened: 0}
 }
 
 func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
@@ -372,8 +327,8 @@ func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
 	for {
 		select {
 		case <-session.wasReset:
-			if session.counter != 2 {
-				t.Error("Unexpected counter:", session.counter)
+			if session.timesUrlOpened != 2 {
+				t.Error("Unexpected URL open count:", session.timesUrlOpened)
 			}
 			close(session.Quit())
 			return
