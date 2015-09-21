@@ -173,7 +173,7 @@ func (w *ArchiveFileWriter) Quit() chan int {
 
 func NewArchiveFileWriter(
 		broadcast chan []byte, quit chan int,
-		fileName string) (ArchiveWriter) {
+		fileName string) (*ArchiveFileWriter) {
 	return &ArchiveFileWriter{broadcast, quit, fileName}
 }
 

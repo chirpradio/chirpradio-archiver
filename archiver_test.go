@@ -101,27 +101,15 @@ func TestWriteArchiveFile(t *testing.T) {
 
 
 type MockArchiveErrorWriter struct {
-	MockArchiveWriter
-	broadcast chan []byte
-	quit chan int
+	*MockArchiveWriter
 }
 
 func (w *MockArchiveErrorWriter) OpenFile() (io.WriteCloser, error) {
 	return FakeOpener{}, errors.New("some error")
 }
 
-func (w *MockArchiveErrorWriter) Broadcast() chan []byte {
-	return w.broadcast
-}
-
-func (w *MockArchiveErrorWriter) Quit() chan int {
-	return w.quit
-}
-
 func NewMockArchiveErrorWriter() (*MockArchiveErrorWriter) {
-	return &MockArchiveErrorWriter{
-		broadcast: make(chan []byte),
-		quit: make(chan int)}
+	return &MockArchiveErrorWriter{MockArchiveWriter: NewMockArchiveWriter()}
 }
 
 func TestWriteArchiveFileWithError(t *testing.T) {
