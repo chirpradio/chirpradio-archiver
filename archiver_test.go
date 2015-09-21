@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"io/ioutil"
 	"strings"
 	"testing"
 	"time"
@@ -135,28 +137,64 @@ func TestWriteArchiveFileWithError(t *testing.T) {
 	}
 }
 
-
-type FakeStream struct {
-	io.ReadCloser
+func NewFakeStream() io.ReadCloser {
+	// Make a fake stream chunk for the archive writer to consume.
+	buf := bytes.NewBufferString(strings.Repeat("x", broadcastBuffSize))
+	return ioutil.NopCloser(buf)
 }
 
-func (FakeStream) Read(p []byte) (n int, err error) {
-	return 0, nil
+func NewFakeErrorStream() io.ReadCloser {
+	// Make a stream chunk that is too short and thus will create EOF.
+	buf := bytes.NewBufferString("x")
+	return ioutil.NopCloser(buf)
 }
 
-func (FakeStream) Close() error {
-	return nil
+type MockBroadcastSession struct {
+	urlOpened chan bool
+	broadcast chan []byte
+	quit chan bool
+}
+
+func (*MockBroadcastSession) IncrementRetry() {
+}
+
+func (sess *MockBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
+	sess.urlOpened <-true
+	return &MinimalHttpResponse{NewFakeStream()}, nil
+}
+
+func (*MockBroadcastSession) StreamUrl() string {
+	return fakeStreamUrl
+}
+
+func (sess *MockBroadcastSession) Broadcast() chan []byte {
+	return sess.broadcast
+}
+
+func (sess *MockBroadcastSession) Quit() chan bool {
+	return sess.quit
+}
+
+func (*MockBroadcastSession) MaxRetries() int {
+	return 1
+}
+
+func (*MockBroadcastSession) RetryCount() int {
+	return 0
+}
+
+func (*MockBroadcastSession) ResetRetryCount() {
+}
+
+func NewMockBroadcastSession() *MockBroadcastSession {
+	return &MockBroadcastSession{
+		urlOpened: make(chan bool),
+		broadcast: make(chan []byte),
+		quit: make(chan bool)}
 }
 
 func TestStreamBroadcast(t *testing.T) {
-	urlOpened := make(chan bool)
-
-	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
-		urlOpened <- true
-		return &MinimalHttpResponse{&FakeStream{}}, nil
-	}
-
-	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 1)
+	session := NewMockBroadcastSession()
 	go streamBroadcast(session)
 
 	// TODO: figure out how to test that the stream gets sent to the broadcast
@@ -164,8 +202,8 @@ func TestStreamBroadcast(t *testing.T) {
 
 	for {
 		select {
-		case <-urlOpened:
-			close(session.quit)
+		case <-session.urlOpened:
+			close(session.Quit())
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: streamBroadcast should open a URL")
@@ -174,28 +212,51 @@ func TestStreamBroadcast(t *testing.T) {
 }
 
 
+type MockCounterBroadcastSession struct {
+	*MockBroadcastSession
+	counter int
+	urlOpenCount chan int
+	retryCount int
+}
+
+func (sess *MockCounterBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
+	sess.counter += 1
+	sess.urlOpenCount <- sess.counter
+	return &MinimalHttpResponse{NewFakeStream()}, errors.New("some error")
+}
+
+func (sess *MockCounterBroadcastSession) IncrementRetry() {
+	sess.retryCount += 1
+}
+
+func (sess *MockCounterBroadcastSession) MaxRetries() int {
+	return 2
+}
+
+func (sess *MockCounterBroadcastSession) RetryCount() int {
+	return sess.retryCount
+}
+
+func NewMockCounterBroadcastSession() *MockCounterBroadcastSession {
+	return &MockCounterBroadcastSession{
+		MockBroadcastSession: NewMockBroadcastSession(),
+		retryCount: 0,
+		urlOpenCount: make(chan int),
+		counter: 0}
+}
+
 func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
-	urlOpenCount := make(chan int)
-	var counter int = 0;
-
-	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
-		counter += 1
-		urlOpenCount <- counter
-		return &MinimalHttpResponse{&FakeStream{}}, errors.New("some error")
-	}
-
-	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 2)
-	session.retrySleepTime = 1 * time.Nanosecond
+	session := NewMockCounterBroadcastSession()
 	go streamBroadcast(session)
 
 	for {
 		select {
-		case timesOpened := <-urlOpenCount:
+		case timesOpened := <-session.urlOpenCount:
 			if timesOpened < 2 {
 				log("stream not opened enough times:", timesOpened)
 				continue
 			}
-			close(session.quit)
+			close(session.Quit())
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: did not retry enough times after error")
@@ -204,40 +265,51 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 }
 
 
-type FakeErrorStream struct {
-	io.ReadCloser
+type MockReadErrorBroadcastSession struct {
+	*MockBroadcastSession
+	counter int
+	urlOpenCount chan int
+	retryCount int
 }
 
-func (FakeErrorStream) Read(p []byte) (n int, err error) {
-	return 0, errors.New("some Read() error")
+func (sess *MockReadErrorBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
+	sess.counter += 1
+	sess.urlOpenCount <- sess.counter
+	return &MinimalHttpResponse{NewFakeErrorStream()}, nil
 }
 
-func (FakeErrorStream) Close() error {
-	return nil
+func (sess *MockReadErrorBroadcastSession) IncrementRetry() {
+	sess.retryCount += 1
+}
+
+func (sess *MockReadErrorBroadcastSession) MaxRetries() int {
+	return 2
+}
+
+func (sess *MockReadErrorBroadcastSession) RetryCount() int {
+	return sess.retryCount
+}
+
+func NewMockReadErrorBroadcastSession() *MockReadErrorBroadcastSession {
+	return &MockReadErrorBroadcastSession{
+		MockBroadcastSession: NewMockBroadcastSession(),
+		retryCount: 0,
+		urlOpenCount: make(chan int),
+		counter: 0}
 }
 
 func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
-	urlOpenCount := make(chan int)
-	var counter int = 0;
-
-	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
-		counter += 1
-		urlOpenCount <- counter
-		return &MinimalHttpResponse{&FakeErrorStream{}}, nil
-	}
-
-	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 2)
-	session.retrySleepTime = 1 * time.Nanosecond
+	session := NewMockReadErrorBroadcastSession()
 	go streamBroadcast(session)
 
 	for {
 		select {
-		case timesOpened := <-urlOpenCount:
+		case timesOpened := <-session.urlOpenCount:
 			if timesOpened < 2 {
 				log("stream not opened enough times:", timesOpened)
 				continue
 			}
-			close(session.quit)
+			close(session.Quit())
 			return
 		case <-time.After(3 * time.Second):
 			panic("timeout: did not retry enough times after error")
@@ -246,40 +318,67 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 }
 
 
-func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
-	urlOpenCount := make(chan int)
-	var counter int = 0;
+type MockErrorRecoveryBroadcastSession struct {
+	*MockBroadcastSession
+	counter int
+	wasReset chan bool
+	retryCount int
+}
 
-	fakeUrlOpen := func(url string) (*MinimalHttpResponse, error) {
-		counter += 1
-		urlOpenCount <- counter
-		var ret error
-		// Only return an error on the first call.
-		if counter == 1 {
-			ret = errors.New("error to check reset")
-		} else {
-			ret = nil
-		}
-		return &MinimalHttpResponse{&FakeStream{}}, ret
+func (sess *MockErrorRecoveryBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
+	sess.counter += 1
+	var ret error
+	// Only return an error on the first call.
+	if sess.counter == 1 {
+		log("returning error on first call")
+		ret = errors.New("error to check reset")
+	} else {
+		log("returning nil error on call:", sess.counter)
+		ret = nil
 	}
+	return &MinimalHttpResponse{NewFakeStream()}, ret
+}
 
-	session := NewBroadcastSession(fakeStreamUrl, fakeUrlOpen, 3)
-	session.retrySleepTime = 1 * time.Nanosecond
+func (sess *MockErrorRecoveryBroadcastSession) IncrementRetry() {
+	sess.retryCount += 1
+}
+
+func (sess *MockErrorRecoveryBroadcastSession) MaxRetries() int {
+	return 3
+}
+
+func (sess *MockErrorRecoveryBroadcastSession) RetryCount() int {
+	return sess.retryCount
+}
+
+func (sess *MockErrorRecoveryBroadcastSession) ResetRetryCount() {
+	log("resetting retry count")
+	sess.wasReset <-true
+	sess.retryCount = 0
+}
+
+func NewMockErrorRecoveryBroadcastSession() *MockErrorRecoveryBroadcastSession {
+	return &MockErrorRecoveryBroadcastSession{
+		MockBroadcastSession: NewMockBroadcastSession(),
+		retryCount: 0,
+		wasReset: make(chan bool),
+		counter: 0}
+}
+
+func TestStreamBroadcastResetsAfterErrorRecovery(t *testing.T) {
+	session := NewMockErrorRecoveryBroadcastSession()
 	go streamBroadcast(session)
 
 	for {
 		select {
-		case <-urlOpenCount:
-			// TODO: fix this test so it actually verifies the reset.
-			// There is some timing error here where it always passes :/
-			if session.retryCount != 0 {
-				log("retry count has not been reset yet")
-				continue
+		case <-session.wasReset:
+			if session.counter != 2 {
+				t.Error("Unexpected counter:", session.counter)
 			}
-			close(session.quit)
+			close(session.Quit())
 			return
 		case <-time.After(3 * time.Second):
-			panic("timeout: did not retry enough times after error")
+			panic("timeout: did not reset after error")
 		}
 	}
 }

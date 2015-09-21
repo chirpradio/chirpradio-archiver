@@ -26,50 +26,89 @@ type MinimalHttpResponse struct {
 	Body io.ReadCloser
 }
 
-type urlOpener func(string) (*MinimalHttpResponse, error)
+type BroadcastSession interface {
+	OpenUrl(url string) (*MinimalHttpResponse, error)
+	StreamUrl() string
+	Broadcast() chan []byte
+	Quit() chan bool
+	RetryCount() int
+	MaxRetries() int
+	IncrementRetry()
+	ResetRetryCount()
+}
 
-
-type BroadcastSession struct {
+type ChirpBroadcastSession struct {
 	streamUrl string
 	broadcast chan []byte
-	openUrl urlOpener
 	maxRetries int
 	quit chan bool
 	retryCount int
 	retrySleepTime time.Duration
 }
 
-func (sess *BroadcastSession) IncrementRetry() {
+func (sess *ChirpBroadcastSession) IncrementRetry() {
 	time.Sleep(sess.retrySleepTime)
 	sess.retryCount += 1
 	log("Retrying...", sess.retryCount)
 }
 
-func NewBroadcastSession(
-		streamUrl string, openUrl urlOpener, maxRetries int) *BroadcastSession {
+func (*ChirpBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
+	response, err := http.Get(url)
+	if err != nil {
+		return &MinimalHttpResponse{}, err
+	}
+	return &MinimalHttpResponse{response.Body}, err
+}
+
+func (sess *ChirpBroadcastSession) StreamUrl() string {
+	return sess.streamUrl
+}
+
+func (sess *ChirpBroadcastSession) Broadcast() chan []byte {
+	return sess.broadcast
+}
+
+func (sess *ChirpBroadcastSession) Quit() chan bool {
+	return sess.quit
+}
+
+func (sess *ChirpBroadcastSession) MaxRetries() int {
+	return sess.maxRetries
+}
+
+func (sess *ChirpBroadcastSession) RetryCount() int {
+	return sess.retryCount
+}
+
+func (sess *ChirpBroadcastSession) ResetRetryCount() {
+	sess.retryCount = 0
+}
+
+func NewChirpBroadcastSession(
+		streamUrl string, maxRetries int) BroadcastSession {
 	broadcast := make(chan []byte, broadcastBuffSize)
 	quit := make(chan bool)
 	retryCount := 0
 	retrySleepTime := 2 * time.Second
 
-	return &BroadcastSession{
-		streamUrl, broadcast, openUrl, maxRetries, quit,
+	return &ChirpBroadcastSession{
+		streamUrl, broadcast, maxRetries, quit,
 		retryCount, retrySleepTime}
 }
 
 
-func streamBroadcast(session *BroadcastSession) error {
+func streamBroadcast(session BroadcastSession) error {
 
-	if session.retryCount == session.maxRetries {
+	if session.RetryCount() == session.MaxRetries() {
 		log("streamBroadcast: too many error recovery retries")
 		return errors.New("too many retries")
 	}
 
-	log("Streaming broadcast from", session.streamUrl)
-	response, err := session.openUrl(session.streamUrl)
+	log("Streaming broadcast from", session.StreamUrl())
+	response, err := session.OpenUrl(session.StreamUrl())
 
 	if err != nil {
-		log("Error while downloading", session.streamUrl, ":", err)
+		log("Error while downloading", session.StreamUrl(), ":", err)
 		session.IncrementRetry()
 		return streamBroadcast(session)
 	}
@@ -79,20 +118,20 @@ func streamBroadcast(session *BroadcastSession) error {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			log("Error while streaming", session.streamUrl, ":", err)
+			log("Error while streaming", session.StreamUrl(), ":", err)
 			session.IncrementRetry()
 			return streamBroadcast(session)
 		}
 
 		// We've successfully recovered from the last persistent error
 		// so reset the retry count.
-		session.retryCount = 0
+		session.ResetRetryCount()
 
 		select {
-		case <-session.quit:
+		case <-session.Quit():
 			log("stopping stream from quit signal")
 			return nil
-		case session.broadcast <-buff:
+		case session.Broadcast() <-buff:
 			continue
 		}
 	}
@@ -205,19 +244,12 @@ func main() {
 
 	flag.Parse()
 
-	openUrl := func(url string) (*MinimalHttpResponse, error) {
-		response, err := http.Get(url)
-		if err != nil {
-			return &MinimalHttpResponse{}, err
-		}
-		return &MinimalHttpResponse{response.Body}, err
-	}
-	maxErrorRetries := 10
-	session := NewBroadcastSession(url, openUrl, maxErrorRetries)
+	maxErrorRetries := 8
+	session := NewChirpBroadcastSession(url, maxErrorRetries)
 	go streamBroadcast(session)
 
 	archive := NewArchiveConfig(
-		archiveDest, session.broadcast, time.Now(), writeArchiveFile)
+		archiveDest, session.Broadcast(), time.Now(), writeArchiveFile)
 	archiveChan := rotateArchiveFile(archive)
 
 	// TODO: force Chicago time so files are always in sync with the broadcast.
