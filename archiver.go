@@ -125,6 +125,9 @@ func streamBroadcast(session BroadcastSession) error {
 
 		// We've successfully recovered from the last persistent error
 		// so reset the retry count.
+		if session.RetryCount() > 0 {
+			log("Recovered from last error")
+		}
 		session.ResetRetryCount()
 
 		select {
