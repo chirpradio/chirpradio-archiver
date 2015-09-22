@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,31 +15,39 @@ import (
 var fakeStreamUrl = "http://not-chirpradio.org/"
 
 
-func TestRotateArchiveFile(t *testing.T) {
-	writerCalled := make(chan bool)
-
-	prefix := "/archive-dir-prefix"
-	broadcast := make(chan []byte, broadcastBuffSize)
-	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
-
-	writer := func (info ArchiveWriter) error {
-		fileIsOk := strings.HasSuffix(info.FileName(),
-			"chirpradio_2015-09-18_230000.mp3")
-		if !fileIsOk {
-			t.Error("Unexpected suffix:", info.FileName())
-		}
-
-		dirIsOk := strings.HasPrefix(info.FileName(), prefix)
-		if !dirIsOk {
-			t.Error("Unexpected prefix:", info.FileName())
-		}
-
-		writerCalled <- true
-		close(writerCalled)
-		return nil
+func makeTempDir() string {
+	tempDir, err := ioutil.TempDir("", "archiver_test_")
+	if err != nil {
+		panic(fmt.Sprintf("TempDir error: %s", err))
 	}
+	return tempDir
+}
 
-	rotateArchiveFile(NewArchiveConfig(prefix, broadcast, ts, writer))
+
+type MockArchiveConfig struct {
+	*ChirpArchiveConfig
+	writerCalled chan bool
+}
+
+func (archive *MockArchiveConfig) WriteFile(info ArchiveWriter) error {
+	archive.writerCalled <- true
+	close(archive.writerCalled)
+	return nil
+}
+
+func NewMockArchiveConfig(
+		writerCalled chan bool, rootDir string) *MockArchiveConfig {
+	chirpConfig := NewChirpArchiveConfig(rootDir)
+	return &MockArchiveConfig{ChirpArchiveConfig: chirpConfig, writerCalled: writerCalled}
+}
+
+func TestRotateArchiveFile(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	writerCalled := make(chan bool)
+	broadcast := make(chan []byte, broadcastBuffSize)
+
+	rotateArchiveFile(broadcast, time.Now(), NewMockArchiveConfig(writerCalled, tmpDir))
 
 	for {
 		select {
@@ -50,8 +60,104 @@ func TestRotateArchiveFile(t *testing.T) {
 }
 
 
+func TestArchiveConfigTimeStampsFiles(t *testing.T) {
+	rootDir := "/archive-dir-prefix"
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(rootDir)
+	fileName := chirpConfig.FileName(rootDir, ts)
+
+	if !strings.HasSuffix(fileName, "chirpradio_2015-09-18_230000.mp3") {
+		t.Error("Unexpected suffix:", fileName)
+	}
+}
+
+
+func TestArchiveConfigWritesToDirRoot(t *testing.T) {
+	rootDir := "/archive-dir-prefix"
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(rootDir)
+	fileName := chirpConfig.FileName(rootDir, ts)
+
+	if !strings.HasPrefix(fileName, rootDir) {
+		t.Error("Unexpected prefix:", fileName)
+	}
+}
+
+
+func TestArchiveConfigPrefixesByYearDate(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	dest := chirpConfig.Dest(ts)
+
+	if !strings.HasPrefix(dest, fmt.Sprintf("%s/2015/09", tmpDir)) {
+		t.Error("Unexpected prefix:", dest)
+	}
+}
+
+
+func TestArchiveConfigCreatesYearPrefix(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	chirpConfig.Dest(ts)
+
+	expectedPrefix := fmt.Sprintf("%s/2015", tmpDir)
+	_, err := os.Stat(expectedPrefix)
+	if err != nil {
+		contents, _ := ioutil.ReadDir(tmpDir)
+		t.Error("year prefix was not created:", contents)
+	}
+}
+
+
+func TestArchiveConfigUsesExistingYearPrefix(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	os.MkdirAll(fmt.Sprintf("%s/2015", tmpDir), 0744)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	chirpConfig.Dest(ts)  // no panicking
+}
+
+
+func TestArchiveConfigCreatesMonthPrefix(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	os.MkdirAll(fmt.Sprintf("%s/2015", tmpDir), 0744)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	chirpConfig.Dest(ts)
+
+	expectedPrefix := fmt.Sprintf("%s/2015/09", tmpDir)
+	_, err := os.Stat(expectedPrefix)
+	if err != nil {
+		contents, _ := ioutil.ReadDir(tmpDir)
+		t.Error("month prefix was not created:", contents)
+	}
+}
+
+
+func TestArchiveConfigUsesExistingMonthPrefix(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	os.MkdirAll(fmt.Sprintf("%s/2015/09", tmpDir), 0744)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	chirpConfig.Dest(ts)  // no panicking
+}
+
+
 type FakeOpener struct {
-	io.WriteCloser
 }
 
 func (f FakeOpener) Write(p []byte) (n int, err error) {

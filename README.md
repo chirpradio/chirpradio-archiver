@@ -18,6 +18,12 @@ clone this repository, and start archiving like this:
     cd chirpradio-archiver/
     go run archiver.go -url=http://chirpradio.org/stream -dest=/path/to/archives
 
+This will write archive files like the following example:
+
+    /path/to/archives/2015/09/chirpradio_2015-09-21_000000.mp3
+
+Any non-existing timestamp directories will be created.
+
 ## Architecture
 
 This program utilizes goroutines for robust and precise archiving. Here are some

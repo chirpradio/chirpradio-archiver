@@ -177,8 +177,6 @@ func NewArchiveFileWriter(
 	return &ArchiveFileWriter{broadcast, quit, fileName}
 }
 
-type fileOpener func(string) (io.WriteCloser, error)
-
 func writeArchiveFile(writer ArchiveWriter) error {
 	output, err := writer.OpenFile()
 	if err != nil {
@@ -198,35 +196,52 @@ func writeArchiveFile(writer ArchiveWriter) error {
 }
 
 
-type writeArchiveHandler func(writer ArchiveWriter) error
-
-type ArchiveConfig struct {
-	dest string
-	broadcast chan []byte
-	ts time.Time
-	writeFile writeArchiveHandler
+type ArchiveConfig interface {
+	FileName(dest string, ts time.Time) string
+	Dest(ts time.Time) string
+	WriteFile(writer ArchiveWriter) error
 }
 
-func NewArchiveConfig(
-		dest string, broadcast chan []byte, ts time.Time,
-		writeFile writeArchiveHandler) (*ArchiveConfig) {
-	return &ArchiveConfig{dest, broadcast, ts, writeFile}
+type ChirpArchiveConfig struct {
+	rootDir string
 }
 
-func rotateArchiveFile(archive *ArchiveConfig) chan int {
+func (archive *ChirpArchiveConfig) Dest(ts time.Time) string {
+	prefix := fmt.Sprintf("%s/%d/%02d", archive.rootDir, ts.Year(), ts.Month())
+	err := os.MkdirAll(prefix, 0744)
+	if err != nil {
+		panic(err)
+	}
+	return prefix
+}
 
-	// TODO: split directory into YYYY/MM
+func (*ChirpArchiveConfig) FileName(dest string, ts time.Time) string {
 	// TODO: protect against overwriting existing files.
-	fileName := fmt.Sprintf(
+	return fmt.Sprintf(
 		"%s/chirpradio_%d-%02d-%02d_%02d%02d%02d.mp3",
-		archive.dest,
-		archive.ts.Year(), archive.ts.Month(), archive.ts.Day(),
-		archive.ts.Hour(), archive.ts.Minute(), archive.ts.Second(),
+		dest,
+		ts.Year(), ts.Month(), ts.Day(),
+		ts.Hour(), ts.Minute(), ts.Second(),
 	)
+}
+
+func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) error {
+	// TODO: maybe move the writeArchiveFile implementation over here :)
+	return writeArchiveFile(writer)
+}
+
+func NewChirpArchiveConfig(rootDir string) (*ChirpArchiveConfig) {
+	return &ChirpArchiveConfig{rootDir}
+}
+
+func rotateArchiveFile(
+		broadcast chan []byte, ts time.Time, archive ArchiveConfig) chan int {
+	dest := archive.Dest(ts)
+	fileName := archive.FileName(dest, ts)
 	archiveChan := make(chan int)
 
-	writer := NewArchiveFileWriter(archive.broadcast, archiveChan, fileName)
-	go archive.writeFile(writer)
+	writer := NewArchiveFileWriter(broadcast, archiveChan, fileName)
+	go archive.WriteFile(writer)
 
 	return archiveChan
 }
@@ -246,11 +261,11 @@ func main() {
 
 	maxErrorRetries := 8
 	session := NewChirpBroadcastSession(url, maxErrorRetries)
+	broadcast := session.Broadcast()
 	go streamBroadcast(session)
 
-	archive := NewArchiveConfig(
-		archiveDest, session.Broadcast(), time.Now(), writeArchiveFile)
-	archiveChan := rotateArchiveFile(archive)
+	archive := NewChirpArchiveConfig(archiveDest)
+	archiveChan := rotateArchiveFile(broadcast, time.Now(), archive)
 
 	// TODO: force Chicago time so files are always in sync with the broadcast.
 	ticker := time.NewTicker(1 * time.Second)
@@ -263,8 +278,7 @@ func main() {
 		tick := <-ticker.C
 		if tick.Minute() == 0 && tick.Second() == 0 {
 			close(archiveChan)
-			archive.ts = tick
-			archiveChan = rotateArchiveFile(archive)
+			archiveChan = rotateArchiveFile(broadcast, tick, archive)
 		}
 	}
 }
