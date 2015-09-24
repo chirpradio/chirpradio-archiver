@@ -207,6 +207,28 @@ func TestWriteArchiveFile(t *testing.T) {
 }
 
 
+func TestWriteArchiveFileExitsOnQuit(t *testing.T) {
+	archive := NewChirpArchiveConfig("fake-directory-path")
+	writer := NewMockArchiveWriter()
+	exit := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-exit:
+				return
+			case <-time.After(3 * time.Second):
+				panic("timeout: archive.WriteFile did not exit on Quit()!")
+			}
+		}
+	}()
+
+	close(writer.Quit())
+	archive.WriteFile(writer)
+	exit <-true
+}
+
+
 type MockArchiveErrorWriter struct {
 	*MockArchiveWriter
 }

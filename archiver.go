@@ -221,6 +221,7 @@ func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) {
 			output.Write(streamChunk)
 		case <-writer.Quit():
 			output.Close()
+			return
 		}
 	}
 }
