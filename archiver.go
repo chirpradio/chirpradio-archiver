@@ -254,6 +254,8 @@ func main() {
 
 	flag.Parse()
 
+	log("Starting archiver")
+
 	maxErrorRetries := 8
 	session := NewChirpBroadcastSession(url, maxErrorRetries)
 	broadcast := session.Broadcast()
