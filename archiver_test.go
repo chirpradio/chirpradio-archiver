@@ -29,16 +29,16 @@ type MockArchiveConfig struct {
 	writerCalled chan bool
 }
 
-func (archive *MockArchiveConfig) WriteFile(info ArchiveWriter) error {
+func (archive *MockArchiveConfig) WriteFile(info ArchiveWriter) {
 	archive.writerCalled <- true
 	close(archive.writerCalled)
-	return nil
 }
 
 func NewMockArchiveConfig(
 		writerCalled chan bool, rootDir string) *MockArchiveConfig {
 	chirpConfig := NewChirpArchiveConfig(rootDir)
-	return &MockArchiveConfig{ChirpArchiveConfig: chirpConfig, writerCalled: writerCalled}
+	return &MockArchiveConfig{
+		ChirpArchiveConfig: chirpConfig, writerCalled: writerCalled}
 }
 
 func TestRotateArchiveFile(t *testing.T) {
@@ -224,11 +224,17 @@ func TestWriteArchiveFileWithError(t *testing.T) {
 	// expected.
 	close(writer.Quit())
 
-	result := writeArchiveFile(writer)
+	recovered := false
+	defer func() {
+		if r := recover(); r != nil {
+			recovered = true
+		}
+		if !recovered {
+			t.Error("Expected to recover from a panic")
+		}
+	}()
 
-	if result == nil {
-		t.Error("Unexpected result")
-	}
+	writeArchiveFile(writer)
 }
 
 
