@@ -196,8 +196,9 @@ func NewMockArchiveWriter() (*MockArchiveWriter) {
 }
 
 func TestWriteArchiveFile(t *testing.T) {
+	archive := NewChirpArchiveConfig("fake-directory-path")
 	writer := NewMockArchiveWriter()
-	go writeArchiveFile(writer)
+	go archive.WriteFile(writer)
 
 	// Send some data through the broadcast channel.
 	writer.Broadcast() <- []byte{0, 0}
@@ -220,6 +221,7 @@ func NewMockArchiveErrorWriter() (*MockArchiveErrorWriter) {
 
 func TestWriteArchiveFileWithError(t *testing.T) {
 	writer := NewMockArchiveErrorWriter()
+	archive := NewChirpArchiveConfig("fake-directory-path")
 	// Close the channel in case the implementation doesn't return early as
 	// expected.
 	close(writer.Quit())
@@ -234,7 +236,7 @@ func TestWriteArchiveFileWithError(t *testing.T) {
 		}
 	}()
 
-	writeArchiveFile(writer)
+	archive.WriteFile(writer)
 }
 
 

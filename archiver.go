@@ -178,23 +178,6 @@ func NewArchiveFileWriter(
 	return &ArchiveFileWriter{broadcast, quit, fileName}
 }
 
-func writeArchiveFile(writer ArchiveWriter) {
-	output, err := writer.OpenFile()
-	if err != nil {
-		log("Error while creating", writer.FileName(), ":", err)
-		panic(err)
-	}
-
-	for {
-		select {
-		case streamChunk := <-writer.Broadcast():
-			output.Write(streamChunk)
-		case <-writer.Quit():
-			output.Close()
-		}
-	}
-}
-
 
 type ArchiveConfig interface {
 	FileName(dest string, ts time.Time) string
@@ -226,8 +209,20 @@ func (*ChirpArchiveConfig) FileName(dest string, ts time.Time) string {
 }
 
 func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) {
-	// TODO: maybe move the writeArchiveFile implementation over here :)
-	writeArchiveFile(writer)
+	output, err := writer.OpenFile()
+	if err != nil {
+		log("Error while creating", writer.FileName(), ":", err)
+		panic(err)
+	}
+
+	for {
+		select {
+		case streamChunk := <-writer.Broadcast():
+			output.Write(streamChunk)
+		case <-writer.Quit():
+			output.Close()
+		}
+	}
 }
 
 func NewChirpArchiveConfig(rootDir string) (*ChirpArchiveConfig) {
