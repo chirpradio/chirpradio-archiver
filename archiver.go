@@ -5,21 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"time"
 )
 
 const broadcastBuffSize = 1024 * 64  // 64Kb of data
-
-
-func log(args ...interface{}) {
-	t := time.Now()
-	fmt.Printf("%d-%02d-%02dT%02d:%02d ",
-		t.Year(), t.Month(), t.Day(),
-		t.Hour(), t.Minute())
-	fmt.Println(args...)
-}
+var (
+    Trace *log.Logger
+    Info *log.Logger
+    Error *log.Logger
+)
 
 
 type MinimalHttpResponse struct {
@@ -49,7 +47,7 @@ type ChirpBroadcastSession struct {
 func (sess *ChirpBroadcastSession) IncrementRetry() {
 	time.Sleep(sess.retrySleepTime)
 	sess.retryCount += 1
-	log("Retrying...", sess.retryCount)
+	Info.Println("Retrying...", sess.retryCount)
 }
 
 func (*ChirpBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
@@ -100,15 +98,15 @@ func NewChirpBroadcastSession(
 func streamBroadcast(session BroadcastSession) error {
 
 	if session.RetryCount() == session.MaxRetries() {
-		log("streamBroadcast: too many error recovery retries")
+		Info.Println("streamBroadcast: too many error recovery retries")
 		return errors.New("too many retries")
 	}
 
-	log("Streaming broadcast from", session.StreamUrl())
+	Info.Println("Streaming broadcast from", session.StreamUrl())
 	response, err := session.OpenUrl(session.StreamUrl())
 
 	if err != nil {
-		log("Error while downloading", session.StreamUrl(), ":", err)
+		Info.Println("Error while downloading", session.StreamUrl(), ":", err)
 		session.IncrementRetry()
 		return streamBroadcast(session)
 	}
@@ -118,19 +116,19 @@ func streamBroadcast(session BroadcastSession) error {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			log("Error while streaming", session.StreamUrl(), ":", err)
+			Info.Println("Error while streaming", session.StreamUrl(), ":", err)
 			session.IncrementRetry()
 			return streamBroadcast(session)
 		}
 
 		if session.RetryCount() > 0 {
-			log("Recovered from last error")
+			Info.Println("Recovered from last error")
 			session.ResetRetryCount()
 		}
 
 		select {
 		case <-session.Quit():
-			log("stopping stream from quit signal")
+			Info.Println("stopping stream from quit signal")
 			return nil
 		case session.Broadcast() <-buff:
 			continue
@@ -155,7 +153,7 @@ type ArchiveFileWriter struct {
 }
 
 func (w *ArchiveFileWriter) OpenFile() (io.WriteCloser, error) {
-	log("Opening new archive file:", w.fileName)
+	Trace.Println("Opening new archive file:", w.fileName)
 	file, err := os.Create(w.fileName)
 	return file, err
 }
@@ -211,7 +209,7 @@ func (*ChirpArchiveConfig) FileName(dest string, ts time.Time) string {
 func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) {
 	output, err := writer.OpenFile()
 	if err != nil {
-		log("Error while creating", writer.FileName(), ":", err)
+		Info.Println("Error while creating", writer.FileName(), ":", err)
 		panic(err)
 	}
 
@@ -243,6 +241,24 @@ func rotateArchiveFile(
 }
 
 
+func initLogging(
+		traceHandle io.Writer,
+		infoHandle io.Writer,
+		errorHandle io.Writer) {
+	Trace = log.New(traceHandle,
+        "TRACE: ",
+        log.Ldate|log.Ltime|log.Lshortfile)
+
+    Info = log.New(infoHandle,
+        "INFO: ",
+        log.Ldate|log.Ltime|log.Lshortfile)
+
+    Error = log.New(errorHandle,
+        "ERROR: ",
+        log.Ldate|log.Ltime|log.Lshortfile)
+}
+
+
 func main() {
 	var url string = "http://chirpradio.org/stream"
 	flag.StringVar(
@@ -255,7 +271,18 @@ func main() {
 
 	flag.Parse()
 
-	log("Starting archiver")
+	quiet := false
+	var traceHandle io.Writer
+	if quiet {
+		traceHandle = ioutil.Discard
+	} else {
+		traceHandle = os.Stdout
+	}
+	infoHandle := os.Stdout
+	errorHandle := os.Stdout
+	initLogging(traceHandle, infoHandle, errorHandle)
+
+	Info.Println("Starting archiver")
 
 	maxErrorRetries := 8
 	session := NewChirpBroadcastSession(url, maxErrorRetries)
