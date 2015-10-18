@@ -21,9 +21,9 @@ Also make sure all Go executables are on your path:
 
     export PATH=$PATH:$GOPATH/bin
 
-Install the archiver:
+Install (or upgrade) the archiver:
 
-    go get github.com/chirpradio/chirpradio-archiver
+    go get -u github.com/chirpradio/chirpradio-archiver
 
 Now you can check out the options for the archiver:
 
