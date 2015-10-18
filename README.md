@@ -13,18 +13,25 @@ yourself (unless testing) because CHIRP Radio pays per listener.
 ## Usage
 
 Install [golang](http://golang.org/) (>= 1.4) and make sure your `$GOPATH` is
-set. Something like this maybe:
+set. Put something like this in your shell profile:
 
     export GOPATH=$HOME/golang
 
-Install the archiver's dependencies:
+Also make sure all Go executables are on your path:
 
-    go get github.com/DramaFever/go-logging
+    export PATH=$PATH:$GOPATH/bin
 
-Clone the `chirpradio-archver` repository, and start archiving like this:
+Install the archiver:
 
-    cd chirpradio-archiver/
-    go run archiver.go -url=http://chirpradio.org/stream -dest=/path/to/archives
+    go get github.com/chirpradio/chirpradio-archiver
+
+Now you can check out the options for the archiver:
+
+    chirpradio-archiver -help
+
+Here's an example of starting the archiver process:
+
+    chirpradio-archiver -url=http://chirpradio.org/stream -dest=/path/to/archives
 
 This will write archive files like the following example:
 
@@ -43,11 +50,22 @@ notes:
 3. If there are errors when processing the stream, they are retried several
    times to recover if possible.
 
-## Developers
+## Development
 
-To make changes or add features, you can run the test suite like this:
+To contribute new features to this library, you can set yourself up the same
+way as above. That is, set your `$GOPATH`, add `$GOPATH/bin` to your `$PATH`,
+and run `go get ...` to fetch the code.
+Change into the source code directory:
+
+    cd $GOPATH/src/github.com/chirpradio/chirpradio-archiver
+
+Here's how to run the tests:
 
     go test
+
+If you need to add any new dependencies, just run:
+
+    go get ./...
 
 ## Bugs?
 
