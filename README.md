@@ -67,6 +67,11 @@ If you need to add any new dependencies, just run:
 
     go get ./...
 
+The `chirpradio-archiver` binary is compiled when you run `go get ...` so
+you need to run it directly if you want to test your local changes:
+
+    go run archiver.go -help
+
 ## Bugs?
 
 Probably! You can report them on the github issue tracker.

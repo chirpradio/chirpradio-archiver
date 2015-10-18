@@ -86,33 +86,23 @@ func TestArchiveConfigWritesToDirRoot(t *testing.T) {
 }
 
 
-func TestArchiveConfigPrefixesByYearDate(t *testing.T) {
+func TestArchiveConfigCreatesDatePrefixedDirectory(t *testing.T) {
 	tmpDir := makeTempDir()
 	defer os.RemoveAll(tmpDir)
 	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
 
 	chirpConfig := NewChirpArchiveConfig(tmpDir)
 	dest := chirpConfig.Dest(ts)
+	expectedPrefix := fmt.Sprintf("%s/2015/09/18", tmpDir)
 
-	if !strings.HasPrefix(dest, fmt.Sprintf("%s/2015/09", tmpDir)) {
+	if !strings.HasPrefix(dest, expectedPrefix) {
 		t.Error("Unexpected prefix:", dest)
 	}
-}
 
-
-func TestArchiveConfigCreatesYearPrefix(t *testing.T) {
-	tmpDir := makeTempDir()
-	defer os.RemoveAll(tmpDir)
-	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
-
-	chirpConfig := NewChirpArchiveConfig(tmpDir)
-	chirpConfig.Dest(ts)
-
-	expectedPrefix := fmt.Sprintf("%s/2015", tmpDir)
 	_, err := os.Stat(expectedPrefix)
 	if err != nil {
 		contents, _ := ioutil.ReadDir(tmpDir)
-		t.Error("year prefix was not created:", contents)
+		t.Error("date prefix directories were not created:", contents)
 	}
 }
 
@@ -128,28 +118,21 @@ func TestArchiveConfigUsesExistingYearPrefix(t *testing.T) {
 }
 
 
-func TestArchiveConfigCreatesMonthPrefix(t *testing.T) {
-	tmpDir := makeTempDir()
-	defer os.RemoveAll(tmpDir)
-	os.MkdirAll(fmt.Sprintf("%s/2015", tmpDir), 0744)
-	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
-
-	chirpConfig := NewChirpArchiveConfig(tmpDir)
-	chirpConfig.Dest(ts)
-
-	expectedPrefix := fmt.Sprintf("%s/2015/09", tmpDir)
-	_, err := os.Stat(expectedPrefix)
-	if err != nil {
-		contents, _ := ioutil.ReadDir(tmpDir)
-		t.Error("month prefix was not created:", contents)
-	}
-}
-
-
 func TestArchiveConfigUsesExistingMonthPrefix(t *testing.T) {
 	tmpDir := makeTempDir()
 	defer os.RemoveAll(tmpDir)
 	os.MkdirAll(fmt.Sprintf("%s/2015/09", tmpDir), 0744)
+	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
+
+	chirpConfig := NewChirpArchiveConfig(tmpDir)
+	chirpConfig.Dest(ts)  // no panicking
+}
+
+
+func TestArchiveConfigUsesExistingDayPrefix(t *testing.T) {
+	tmpDir := makeTempDir()
+	defer os.RemoveAll(tmpDir)
+	os.MkdirAll(fmt.Sprintf("%s/2015/09/18", tmpDir), 0744)
 	ts := time.Date(2015, time.September, 18, 23, 0, 0, 0, time.UTC)
 
 	chirpConfig := NewChirpArchiveConfig(tmpDir)

@@ -191,7 +191,9 @@ type ChirpArchiveConfig struct {
 }
 
 func (archive *ChirpArchiveConfig) Dest(ts time.Time) string {
-	prefix := fmt.Sprintf("%s/%d/%02d", archive.rootDir, ts.Year(), ts.Month())
+	// Organize archive files in YYYY/MM/DD directories.
+	prefix := fmt.Sprintf(
+		"%s/%d/%02d/%02d", archive.rootDir, ts.Year(), ts.Month(), ts.Day())
 	err := os.MkdirAll(prefix, 0744)
 	if err != nil {
 		panic(err)
