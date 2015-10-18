@@ -12,8 +12,16 @@ yourself (unless testing) because CHIRP Radio pays per listener.
 
 ## Usage
 
-Install [golang](http://golang.org/) (>= 1.4),
-clone this repository, and start archiving like this:
+Install [golang](http://golang.org/) (>= 1.4) and make sure your `$GOPATH` is
+set. Something like this maybe:
+
+    export GOPATH=$HOME/golang
+
+Install the archiver's dependencies:
+
+    go get github.com/DramaFever/go-logging
+
+Clone the `chirpradio-archver` repository, and start archiving like this:
 
     cd chirpradio-archiver/
     go run archiver.go -url=http://chirpradio.org/stream -dest=/path/to/archives

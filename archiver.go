@@ -5,19 +5,22 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"time"
+	"github.com/DramaFever/go-logging"
 )
 
+func newLog() logging.Logger {
+	logger, err := logging.New(logging.DebugLvl, os.Stdout, "", nil)
+	if err != nil {
+		panic(err)
+	}
+	return logger
+}
+
 const broadcastBuffSize = 1024 * 64  // 64Kb of data
-var (
-    Trace *log.Logger
-    Info *log.Logger
-    Error *log.Logger
-)
+var log = newLog()
 
 
 type MinimalHttpResponse struct {
@@ -47,7 +50,7 @@ type ChirpBroadcastSession struct {
 func (sess *ChirpBroadcastSession) IncrementRetry() {
 	time.Sleep(sess.retrySleepTime)
 	sess.retryCount += 1
-	Info.Println("Retrying...", sess.retryCount)
+	log.Info("Retrying...", sess.retryCount)
 }
 
 func (*ChirpBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
@@ -98,15 +101,15 @@ func NewChirpBroadcastSession(
 func streamBroadcast(session BroadcastSession) error {
 
 	if session.RetryCount() == session.MaxRetries() {
-		Info.Println("streamBroadcast: too many error recovery retries")
+		log.Info("streamBroadcast: too many error recovery retries")
 		return errors.New("too many retries")
 	}
 
-	Info.Println("Streaming broadcast from", session.StreamUrl())
+	log.Info("Streaming broadcast from", session.StreamUrl())
 	response, err := session.OpenUrl(session.StreamUrl())
 
 	if err != nil {
-		Info.Println("Error while downloading", session.StreamUrl(), ":", err)
+		log.Info("Error while downloading", session.StreamUrl(), ":", err)
 		session.IncrementRetry()
 		return streamBroadcast(session)
 	}
@@ -116,19 +119,19 @@ func streamBroadcast(session BroadcastSession) error {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			Info.Println("Error while streaming", session.StreamUrl(), ":", err)
+			log.Info("Error while streaming", session.StreamUrl(), ":", err)
 			session.IncrementRetry()
 			return streamBroadcast(session)
 		}
 
 		if session.RetryCount() > 0 {
-			Info.Println("Recovered from last error")
+			log.Info("Recovered from last error")
 			session.ResetRetryCount()
 		}
 
 		select {
 		case <-session.Quit():
-			Info.Println("stopping stream from quit signal")
+			log.Info("stopping stream from quit signal")
 			return nil
 		case session.Broadcast() <-buff:
 			continue
@@ -153,7 +156,7 @@ type ArchiveFileWriter struct {
 }
 
 func (w *ArchiveFileWriter) OpenFile() (io.WriteCloser, error) {
-	Trace.Println("Opening new archive file:", w.fileName)
+	log.Debug("Opening new archive file:", w.fileName)
 	file, err := os.Create(w.fileName)
 	return file, err
 }
@@ -209,7 +212,7 @@ func (*ChirpArchiveConfig) FileName(dest string, ts time.Time) string {
 func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) {
 	output, err := writer.OpenFile()
 	if err != nil {
-		Info.Println("Error while creating", writer.FileName(), ":", err)
+		log.Info("Error while creating", writer.FileName(), ":", err)
 		panic(err)
 	}
 
@@ -241,48 +244,31 @@ func rotateArchiveFile(
 }
 
 
-func initLogging(
-		traceHandle io.Writer,
-		infoHandle io.Writer,
-		errorHandle io.Writer) {
-	Trace = log.New(traceHandle,
-        "TRACE: ",
-        log.Ldate|log.Ltime|log.Lshortfile)
-
-    Info = log.New(infoHandle,
-        "INFO: ",
-        log.Ldate|log.Ltime|log.Lshortfile)
-
-    Error = log.New(errorHandle,
-        "ERROR: ",
-        log.Ldate|log.Ltime|log.Lshortfile)
-}
-
-
 func main() {
 	var url string = "http://chirpradio.org/stream"
 	flag.StringVar(
-		&url, "url", url, "URL to the CHIRP Radio broadcast stream.")
+		&url, "url", url,
+		"CHIRP Radio broadcast stream URL. On the internal network this should be a " +
+		"URL to the streaming appliance.")
 
 	var archiveDest = "./archives"
 	flag.StringVar(
 		&archiveDest, "dest", archiveDest,
 		"Directory to write archives to. This must exist and be writable.")
 
+	quiet := flag.Bool("quiet", false, "When true, debug logging will be hidden.")
+
 	flag.Parse()
 
-	quiet := false
-	var traceHandle io.Writer
-	if quiet {
-		traceHandle = ioutil.Discard
+	var logLevel logging.Level
+	if *quiet {
+		logLevel = logging.InfoLvl
 	} else {
-		traceHandle = os.Stdout
+		logLevel = logging.DebugLvl
 	}
-	infoHandle := os.Stdout
-	errorHandle := os.Stdout
-	initLogging(traceHandle, infoHandle, errorHandle)
 
-	Info.Println("Starting archiver")
+	log = log.SetLevel(logLevel)
+	log.Info("Starting archiver")
 
 	maxErrorRetries := 8
 	session := NewChirpBroadcastSession(url, maxErrorRetries)
