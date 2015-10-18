@@ -359,7 +359,7 @@ func TestStreamBroadcastRetriesAfterOpenError(t *testing.T) {
 		select {
 		case timesOpened := <-session.urlOpenCount:
 			if timesOpened < 2 {
-				log("stream not opened enough times:", timesOpened)
+				log.Info("stream not opened enough times:", timesOpened)
 				continue
 			}
 			close(session.Quit())
@@ -399,7 +399,7 @@ func TestStreamBroadcastRetriesAfterReadError(t *testing.T) {
 		select {
 		case timesOpened := <-session.urlOpenCount:
 			if timesOpened < 2 {
-				log("stream not opened enough times:", timesOpened)
+				log.Info("stream not opened enough times:", timesOpened)
 				continue
 			}
 			close(session.Quit())
@@ -422,17 +422,17 @@ func (sess *MockErrorRecoveryBroadcastSession) OpenUrl(url string) (*MinimalHttp
 	var ret error
 	// Only return an error on the first call.
 	if sess.timesUrlOpened == 1 {
-		log("returning error on first call")
+		log.Info("returning error on first call")
 		ret = errors.New("error to check reset")
 	} else {
-		log("returning nil error on call:", sess.timesUrlOpened)
+		log.Info("returning nil error on call:", sess.timesUrlOpened)
 		ret = nil
 	}
 	return &MinimalHttpResponse{NewFakeStream()}, ret
 }
 
 func (sess *MockErrorRecoveryBroadcastSession) ResetRetryCount() {
-	log("resetting retry count")
+	log.Info("resetting retry count")
 	sess.wasReset <-true
 }
 
