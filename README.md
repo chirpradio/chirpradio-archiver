@@ -39,6 +39,52 @@ This will write archive files like the following example:
 
 Any non-existing timestamp directories will be created.
 
+## Deployment
+
+The archiver is deployed to a dedicated Linux server in CHIRP's studio so that
+it can connect directly to the streaming appliance, as opposed to making an
+external Internet connection to the relayed stream. Here's what you need to know
+about deploying and updating the service.
+
+The `chirpradio-archiver` script is installed to the `$GOPATH` within
+`/home/archiver` but is controlled by
+[upstart](http://upstart.ubuntu.com/). The service starts when the machine boots
+but here's how you would start it manually:
+
+    sudo service chirpradio-archiver start
+
+You can check `/home/archiver/log/archiver.log` to see its output or check
+`/var/log/syslog` if there appears to be a more fatal error.
+
+Here's how to upgrade the service to a newer version of the archiver.
+As the `archiver` user, update the code:
+
+    sudo su archiver
+    go get -u github.com/chirpradio/chirpradio-archiver
+
+As an admin user, restart the service:
+
+    sudo service chirpradio-archiver stop
+    sudo service chirpradio-archiver start
+
+The upstart script (in `/etc/init/chirpradio-archiver.conf`) configures how the
+`chirpradio-archiver` command is executed. Here is an example of the `exec` line
+in that script:
+
+    chirpradio-archiver \
+        -url=http://192.X.X.X:8000/ \
+        -dest=/mnt/disk_array/archives/ \
+        -quiet >> $LOGFILE 2>&1
+
+The `-url` in this case is a special streaming server that the broadcasting
+applicance is configured to run within CHIRP's internal network.
+**IMPORTANT**: this streaming server is only designed to handle one listener
+which means you could knock down an archiver if you tried to connect to it
+twice (for testing, or whatever).
+
+The `-dest` in this case points to the RAID array where archive files are
+stored.
+
 ## Architecture
 
 This program utilizes goroutines for robust and precise archiving. Here are some
@@ -75,3 +121,7 @@ you need to run it directly if you want to test your local changes:
 ## Bugs?
 
 Probably! You can report them on the github issue tracker.
+
+## Questions?
+
+You can reach us at the [chirpdev Google Group](https://groups.google.com/forum/#!forum/chirpdev).
