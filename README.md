@@ -56,16 +56,18 @@ but here's how you would start it manually:
 You can check `/home/archiver/log/archiver.log` to see its output or check
 `/var/log/syslog` if there appears to be a more fatal error.
 
+If the archiver encounters an error, you may be able to get back up and running
+by restarting it. As an admin user, type this:
+
+    sudo service chirpradio-archiver restart
+
 Here's how to upgrade the service to a newer version of the archiver.
 As the `archiver` user, update the code:
 
     sudo su archiver
     go get -u github.com/chirpradio/chirpradio-archiver
 
-As an admin user, restart the service:
-
-    sudo service chirpradio-archiver stop
-    sudo service chirpradio-archiver start
+then restart the service as explained above.
 
 The upstart script (in `/etc/init/chirpradio-archiver.conf`) configures how the
 `chirpradio-archiver` command is executed. Here is an example of the `exec` line
