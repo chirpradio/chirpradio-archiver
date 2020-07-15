@@ -1,9 +1,6 @@
 name: Test
 on: [push, pull_request]
 
-# env:
-# This may not be needed for 1.14
-# GO111MODULE: "on"
 jobs:
   test:
     strategy:
