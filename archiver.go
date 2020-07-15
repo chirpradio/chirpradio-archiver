@@ -8,19 +8,10 @@ import (
 	"net/http"
 	"os"
 	"time"
-	"github.com/DramaFever/go-logging"
+	log "github.com/sirupsen/logrus"
 )
 
-func newLog() logging.Logger {
-	logger, err := logging.New(logging.DebugLvl, os.Stdout, "", nil)
-	if err != nil {
-		panic(err)
-	}
-	return logger
-}
-
 const broadcastBuffSize = 1024 * 64  // 64Kb of data
-var log = newLog()
 
 
 type MinimalHttpResponse struct {
@@ -50,7 +41,9 @@ type ChirpBroadcastSession struct {
 func (sess *ChirpBroadcastSession) IncrementRetry() {
 	time.Sleep(sess.retrySleepTime)
 	sess.retryCount += 1
-	log.Info("Retrying...", sess.retryCount)
+	log.WithFields(log.Fields{
+		"retryCount": sess.retryCount,
+	}).Info("Retrying...")
 }
 
 func (*ChirpBroadcastSession) OpenUrl(url string) (*MinimalHttpResponse, error) {
@@ -105,11 +98,16 @@ func streamBroadcast(session BroadcastSession) error {
 		return errors.New("too many retries")
 	}
 
-	log.Info("Streaming broadcast from", session.StreamUrl())
+	log.WithFields(log.Fields{
+		"url": session.StreamUrl(),
+	}).Info("Streaming broadcast")
 	response, err := session.OpenUrl(session.StreamUrl())
 
 	if err != nil {
-		log.Info("Error while downloading", session.StreamUrl(), ":", err)
+		log.WithFields(log.Fields{
+			"url": session.StreamUrl(),
+			"err": err,
+		}).Info("Error while downloading")
 		session.IncrementRetry()
 		return streamBroadcast(session)
 	}
@@ -119,7 +117,10 @@ func streamBroadcast(session BroadcastSession) error {
 		buff := make([]byte, broadcastBuffSize)
 		_, err := io.ReadFull(response.Body, buff)
 		if err != nil {
-			log.Info("Error while streaming", session.StreamUrl(), ":", err)
+			log.WithFields(log.Fields{
+				"url": session.StreamUrl(),
+				"err": err,
+			}).Info("Error while streaming")
 			session.IncrementRetry()
 			return streamBroadcast(session)
 		}
@@ -156,7 +157,9 @@ type ArchiveFileWriter struct {
 }
 
 func (w *ArchiveFileWriter) OpenFile() (io.WriteCloser, error) {
-	log.Debug("Opening new archive file:", w.fileName)
+	log.WithFields(log.Fields{
+		"file": w.fileName,
+	}).Debug("Opening new archive file")
 	file, err := os.Create(w.fileName)
 	return file, err
 }
@@ -214,7 +217,10 @@ func (*ChirpArchiveConfig) FileName(dest string, ts time.Time) string {
 func (archive *ChirpArchiveConfig) WriteFile(writer ArchiveWriter) {
 	output, err := writer.OpenFile()
 	if err != nil {
-		log.Info("Error while creating", writer.FileName(), ":", err)
+		log.WithFields(log.Fields{
+			"file": writer.FileName(),
+			"err": err,
+		}).Info("Error while creating")
 		panic(err)
 	}
 
@@ -262,14 +268,19 @@ func main() {
 
 	flag.Parse()
 
-	var logLevel logging.Level
+	log.SetFormatter(
+		&log.TextFormatter{
+			// This is a weird Go-specific reference date.
+			// https://stackoverflow.com/questions/36206187/logrus-timestamp-formatting
+			TimestampFormat: "2006-01-02 15:04:05",
+			FullTimestamp: true})
+
 	if *quiet {
-		logLevel = logging.InfoLvl
+		log.SetLevel(log.InfoLevel)
 	} else {
-		logLevel = logging.DebugLvl
+		log.SetLevel(log.DebugLevel)
 	}
 
-	log = log.SetLevel(logLevel)
 	log.Info("Starting archiver")
 
 	maxErrorRetries := 8

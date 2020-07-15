@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	log "github.com/sirupsen/logrus"
 )
 
 var fakeStreamUrl = "http://not-chirpradio.org/"

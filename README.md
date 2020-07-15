@@ -12,7 +12,7 @@ yourself (unless testing) because CHIRP Radio pays per listener.
 
 ## Usage
 
-Install [golang](http://golang.org/) (>= 1.4) and make sure your `$GOPATH` is
+Install [golang](http://golang.org/) (>= 1.14) and make sure your `$GOPATH` is
 set. Put something like this in your shell profile:
 
     export GOPATH=$HOME/golang
@@ -21,7 +21,7 @@ Also make sure all Go executables are on your path:
 
     export PATH=$PATH:$GOPATH/bin
 
-Install (or upgrade) the archiver:
+Install (or upgrade) the archiver on a production system:
 
     go get -u github.com/chirpradio/chirpradio-archiver
 
@@ -56,8 +56,8 @@ but here's how you would start it manually:
 You can check `/home/archiver/log/archiver.log` to see its output or check
 `/var/log/syslog` if there appears to be a more fatal error.
 
-If the archiver encounters an error, you may be able to get back up and running
-by restarting it. As an admin user, type this:
+If the archiver encounters an error, try restarting it.
+As an admin user, type this:
 
     sudo service chirpradio-archiver restart
 
@@ -80,9 +80,10 @@ in that script:
 
 The `-url` in this case is a special streaming server that the broadcasting
 applicance is configured to run within CHIRP's internal network.
-**IMPORTANT**: this streaming server is only designed to handle one listener
+
+**IMPORTANT**: This internal streaming server is only designed to handle one listener
 which means you could knock down an archiver if you tried to connect to it
-twice (for testing, or whatever).
+twice (e.g. for testing).
 
 The `-dest` in this case points to the RAID array where archive files are
 stored.
@@ -100,23 +101,19 @@ notes:
 
 ## Development
 
-To contribute new features to this library, you can set yourself up the same
-way as above. That is, set your `$GOPATH`, add `$GOPATH/bin` to your `$PATH`,
-and run `go get ...` to fetch the code.
-Change into the source code directory:
+To contribute new features to this library, change into the source code directory:
 
-    cd $GOPATH/src/github.com/chirpradio/chirpradio-archiver
+    git clone <this repo>
+    cd chirpradio-archiver
 
 Here's how to run the tests:
 
     go test
 
-If you need to add any new dependencies, just run:
+If you want to add new dependencies, add them to the source code and re-run `go test`. Be sure to commit the changes to `go.mod` and `go.sum`.
 
-    go get ./...
-
-The `chirpradio-archiver` binary is compiled when you run `go get ...` so
-you need to run it directly if you want to test your local changes:
+The `chirpradio-archiver` binary is only compiled when you run `go build`
+so, for development, run it directly to test local changes:
 
     go run archiver.go -help
 
