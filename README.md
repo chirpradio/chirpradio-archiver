@@ -41,11 +41,16 @@ Any non-existing timestamp directories will be created.
 
 ## Deployment
 
-To deploy a new version:
+As a CHIRP admin, follow these instructions to deploy the archiver:
 
-1. Follow the installation steps up above which installs the latest from `master`.
-2. Restart the service using the startup script (documented below).
-3. Tag the revision that was released. For example:
+1. On the `musiclib` server, switch to `archiver` and install the latest code from `master`:
+
+```
+sudo su archiver
+go get -u github.com/chirpradio/chirpradio-archiver
+```
+
+2. From your own workstation (not the server), tag the revision that was released. For example:
 
 ```
 git checkout master
@@ -53,39 +58,48 @@ git tag release-2020-07-16
 git push --tags
 ```
 
-## Startup scripts
+3. Back on the server, restart the service:
 
-The archiver is deployed to a dedicated Linux server in CHIRP's studio so that
-it can connect directly to the streaming appliance, as opposed to making an
-external Internet connection to the relayed stream. Here's what you need to know
-about deploying and updating the service.
+```
+sudo systemctl restart chirpradio-archiver
+```
 
-The `chirpradio-archiver` script is installed to the `$GOPATH` within
-`/home/archiver` but is controlled by
-[upstart](http://upstart.ubuntu.com/). The service starts when the machine boots
-but here's how you would start it manually:
+4. Check the log to see if it started OK:
 
-    sudo service chirpradio-archiver start
+```
+sudo cat /home/archiver/log/archiver.log
+```
+
+5. Take a peek to see that archives are being written:
+
+```
+sudo du -sh /mnt/disk_array/archives/$(date +'%Y')/$(date +'%m')/$(date +'%d')/*
+```
+
+## Troubleshooting
+
+The [systemd](https://www.freedesktop.org/wiki/Software/systemd/) script (in `/etc/systemd/system/chirpradio-archiver.service`) configures how the
+`chirpradio-archiver` command is executed.
+The service starts when the machine boots.
 
 You can check `/home/archiver/log/archiver.log` to see its output or check
 `/var/log/syslog` if there appears to be a more fatal error.
 
-If the archiver encounters an error, try restarting it.
-As an admin user, type this:
+The systemd service is configured to restart on errors but restarting will stop if too many errors are encountered.
 
-    sudo service chirpradio-archiver restart
+To restart the service manually, type:
 
-Here's how to upgrade the service to a newer version of the archiver.
-As the `archiver` user, update the code:
+```
+sudo systemctl restart chirpradio-archiver
+```
 
-    sudo su archiver
-    go get -u github.com/chirpradio/chirpradio-archiver
+## Precautions
 
-then restart the service as explained above.
+The archiver is deployed to a dedicated Linux server in CHIRP's studio so that
+it can connect directly to the streaming appliance, as opposed to making an
+external Internet connection to the relayed stream.
 
-The upstart script (in `/etc/init/chirpradio-archiver.conf`) configures how the
-`chirpradio-archiver` command is executed. Here is an example of the `exec` line
-in that script:
+Here is an example of how the archiver runs:
 
     chirpradio-archiver \
         -url=http://192.X.X.X:8000/ \
