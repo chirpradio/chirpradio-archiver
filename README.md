@@ -41,6 +41,20 @@ Any non-existing timestamp directories will be created.
 
 ## Deployment
 
+To deploy a new version:
+
+1. Follow the installation steps up above which installs the latest from `master`.
+2. Restart the service using the startup script (documented below).
+3. Tag the revision that was released. For example:
+
+```
+git checkout master
+git tag release-2020-07-16
+git push --tags
+```
+
+## Startup scripts
+
 The archiver is deployed to a dedicated Linux server in CHIRP's studio so that
 it can connect directly to the streaming appliance, as opposed to making an
 external Internet connection to the relayed stream. Here's what you need to know
